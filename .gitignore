@@ -1,0 +1,10 @@
+# Secretos: nunca versionar el .env real (ver .env.example para la plantilla)
+.env
+.env.*
+!.env.example
+
+# Dependencias (se instalan con npm install a partir de package.json)
+node_modules/
+
+# Logs de la aplicacion (crecen sin limite hoy, ver hallazgo I12 del plan de pruebas)
+logs/

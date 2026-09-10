@@ -1,0 +1,628 @@
+openapi: 3.0.0
+info:
+  title: API Gestion de productos automarco e inyeccion de pedidos (v2)
+  version: 2.0.0
+  description: Documentación unificada de la API — versión v2 en pruebas previas a reemplazar v1.
+
+servers:
+  - url: https://apiproductos.automarco.cl:3008/api/v2
+  - url: http://localhost:3008/api/v2
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Ingrese su token de autentificacion
+  
+  schemas:
+    Clasificacion:
+      type: object
+      properties:
+        id_cla:
+          type: integer
+          description: ID de la clasificacion
+          example: 2
+        clasificacion_nombre:
+          type: string
+          example: Ampolletas
+    
+    Cilindrada:
+      type: object
+      properties:
+        cilin_id:
+          type: integer
+          description: ID único de la cilindrada.
+          example: 19
+        cilindrada:
+          type: string
+          description: Capacidad del motor.
+          example: "1.6"
+    
+    Modelo:
+      type: object
+      properties:
+        id_mod:
+          type: integer
+          description: ID único del registro.
+          example: 1693
+        mod_id:
+          type: integer
+          description: ID externo o referencia del modelo.
+          example: 550
+        marca_id:
+          type: integer
+          description: ID de la marca.
+          example: 14
+        marca:
+          type: string
+          description: Nombre de la marca.
+          example: "CHEVROLET"
+    
+    Marca:
+      type: object
+      properties:
+        marca_id:
+          type: integer
+          description: ID único de la marca.
+          example: 14
+        marca_nombre:
+          type: string
+          description: Nombre comercial de la marca.
+          example: "CHEVROLET"
+
+    Producto:
+      type: object
+      description: Objeto detallado del repuesto.
+      properties:
+        prod_id:
+          type: string
+          description: ID único o SKU del producto.
+          example: "72204-9"
+        id_prov:
+          type: string
+          description: Código del proveedor.
+          example: "G707127"
+        prod_nombre:
+          type: string
+          description: Nombre completo del producto.
+          example: "Amortiguador Gabriel"
+        prod_texto_corto:
+          type: string
+          description: Descripción breve.
+          example: "Amortiguador Gabriel"
+        prod_precio:
+          type: integer
+          description: Precio unitario.
+          example: 48880
+        prod_stock:
+          type: integer
+          description: Stock disponible.
+          example: 2
+        espe_nombre:
+          type: string
+          description: Especificación técnica (ej. Gas, Hidráulico).
+          example: "Gas"
+        ubi_nombre:
+          type: string
+          description: Ubicación de la pieza en el vehículo.
+          example: "Delantero Izquierdo"
+        marca_nombre:
+          type: string
+          description: Marca del vehículo compatible.
+          example: "Chevrolet"
+        mod_id:
+          type: string
+          description: Modelo del vehículo compatible.
+          example: "Prisma"
+        traccion:
+          type: string
+          description: Tipo de tracción.
+          example: "--"
+        origen:
+          type: string
+          description: País de origen.
+          example: "--"
+        agno_inicio:
+          type: integer
+          description: Año de inicio de compatibilidad.
+          example: 2017
+        agno_fin:
+          type: integer
+          description: Año de fin de compatibilidad.
+          example: 2023
+        empresa:
+          type: string
+          description: Empresa proveedora (GABTEC, AUTOMARCO, AUTOTEC).
+          example: "GABTEC"
+        marca_producto:
+          type: string
+          description: Marca del fabricante del repuesto.
+          example: "Gabriel"
+        version:
+          type: string
+          description: Versión específica del vehículo.
+          example: ""
+        prod_img:
+          type: string
+          description: Ruta relativa interna de la imagen.
+          example: "productos/6099172204-9a.jpg"
+        producto_imagen:
+          type: string
+          description: URL completa y pública de la imagen (Hateoas).
+          example: "https://www.gabtec.cl/imagenes/productos2/thums/72204-9_1.jpg"
+    
+    PedidoResponse:
+      type: object
+      properties:
+        detalle_pedido:
+          type: object
+          properties:
+            pedido:
+              type: string
+              description: Formato RUT Vendedor - Correlativo
+              example: "93-139965"
+            transporte:
+              type: string
+              example: "RETIRA CLIENTE"
+            id_transporte:
+              type: string
+              description: ID del transporte como string
+              example: "2"
+            id_interno:
+              type: integer
+              description: ID autoincremental de la tabla pedidos_api
+              example: 21
+        datos_cliente:
+          type: object
+          properties:
+            rut:
+              type: string
+              example: "76813177-5"
+            condicion_pago:
+              type: object
+              description: Objeto con las condiciones de pago por empresa
+              properties:
+                automarco:
+                  type: string
+                  nullable: true
+                  example: "XB"
+                gabtec:
+                  type: string
+                  nullable: true
+                  example: "XB"
+                autotec:
+                  type: string
+                  nullable: true
+                  example: null
+                hd:
+                  type: string
+                  nullable: true
+                  example: null
+            direccion_despacho:
+              type: string
+              example: "SUCRE 2003"
+            comuna:
+              type: string
+              example: "NUNOA"
+        detalle_productos:
+          type: array
+          description: Lista de productos del pedido.
+          items:
+            type: object
+            properties:
+              sku:
+                type: string
+              descripcion:
+                type: string
+              cantidad:
+                type: integer
+              precio_unitario:
+                type: integer
+              empresa:
+                type: string
+          example:
+            - sku: "70012-6"
+              descripcion: "Amortiguador Daher Boge"
+              cantidad: 10
+              precio_unitario: 10208
+              empresa: "GABTEC"
+            - sku: "10328-4"
+              descripcion: "Alternador "
+              cantidad: 10
+              precio_unitario: 85090
+              empresa: "AUTOMARCO"
+    Transporte:
+      type: object
+      properties:
+        tran_id:
+          type: integer
+          description: ID del transporte.
+          example: 1
+        tran_nombre:
+          type: string
+          description: Nombre de la empresa de transporte.
+          example: "DOMICILIO"
+    SucursalesResponse:
+      type: object
+      properties:
+        rut:
+          type: string
+          description: RUT del cliente autenticado.
+          example: "76073217-6"
+        sucursales:
+          type: object
+          description: Listado de sucursales agrupadas por empresa.
+          properties:
+            AUTOMARCO:
+              type: array
+              items:
+                $ref: '#/components/schemas/DetalleSucursal'
+            GABTEC:
+              type: array
+              items:
+                $ref: '#/components/schemas/DetalleSucursal'
+            AUTOTEC:
+              type: array
+              items:
+                $ref: '#/components/schemas/DetalleSucursal'
+            HD:
+              type: array
+              items:
+                $ref: '#/components/schemas/DetalleSucursal'
+          example:
+            AUTOMARCO:
+              - codigo: "0"
+                direccion: "AV AMERICO VESPUCIO 1256"
+                comuna: "PUDAHUEL"
+              - codigo: "1"
+                direccion: "AV AMERICO VESPUCIO 1256"
+                comuna: "PUDAHUEL"
+              - codigo: "9"
+                direccion: "AV.AMERICO VESPUCIO 1256"
+                comuna: "PUDAHUEL"
+            GABTEC:
+              - codigo: "0"
+                direccion: "AMERICO VESPUCIO OTE 1309"
+                comuna: "PUDAHUEL"
+              - codigo: "1"
+                direccion: "AV.AMERICO VESPUCIO 1256"
+                comuna: "PUDAHUEL"
+            AUTOTEC:
+              - codigo: "0"
+                direccion: "AV AMERICO VESPUCIO 1256"
+                comuna: "PUDAHUEL"
+            HD:
+              - codigo: "0"
+                direccion: "A.VESPUCIO 1256 ENEA"
+                comuna: "PUDAHUEL"
+              - codigo: "1"
+                direccion: "A.VESPUCIO 1256 "
+                comuna: "PUDAHUEL"
+
+    DetalleSucursal:
+      type: object
+      properties:
+        codigo:
+          type: string
+          description: Código interno de la sucursal (cli_sec).
+          example: "0"
+        direccion:
+          type: string
+          description: Dirección física registrada.
+          example: "AV AMERICO VESPUCIO 1256"
+security:
+  - bearerAuth: []
+
+paths:
+  /category:
+    get:
+      summary: Obtener todas las categorias
+      tags:
+        - Categorias
+      responses:
+        '200':
+          description: Listado de clasificaciones obtenido exitosamente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Clasificacion'
+        '401':
+          description: No autorizado. Token no proporcionado o inválido.
+        '403':
+          description: Error interno del servidor.
+  
+  /cilindrada:
+    get:
+      summary: Obtener las cilindradas
+      description: Despliega todas las cilindradas disponibles.
+      tags: 
+        - Cilindradas
+      parameters:
+        - in: query
+          name: order_by
+          schema:
+            type: string
+            default: cili_id__ASC
+          description: Ordenar por `cili_id__ASC` o `cili_id__DESC`.
+      responses:
+        '200':
+          description: Listado obtenido exitosamente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Cilindrada'
+        '401':
+          description: Token no proporcionado o inválido.
+        '500':
+          description: Error interno del servidor.
+
+  /brands:
+    get:
+      summary: Obtener todas las marcas
+      description: |
+        Retorna una lista de marcas de vehículos activas.
+        Requiere autenticación y validación de IP.
+      tags:
+        - Marcas
+      parameters:
+        - in: query
+          name: order_by
+          schema:
+            type: string
+          description: |
+            Campo para elegir el orden de las marcas, puede ser `nombre__ASC` o `nombre__DESC`.
+      responses:
+        '200':
+          description: Listado de marcas obtenido exitosamente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Marca'
+        '401':
+          description: No autorizado. Token no proporcionado o inválido.
+        '403':
+          description: Error interno del servidor.
+
+  /models:
+    get:
+      summary: Obtener todos los modelos
+      description: |
+        Retorna una lista de modelos de vehículos. 
+        Permite filtrar por marca y ordenar los resultados.
+      tags:
+        - Modelos
+      parameters:
+        - in: query
+          name: order_by
+          schema:
+            type: string
+            default: marca_id__ASC
+          description: |
+            Define el ordenamiento. Formato: `campo__DIRECCION`.
+        - in: query
+          name: marca_id
+          schema:
+            type: integer
+            default: 0
+          description: ID de la marca para filtrar los modelos. Si es 0, trae todos.
+      responses:
+        '200':
+          description: Listado de modelos obtenido exitosamente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Modelo'
+        '401':
+          description: No autorizado. Token no proporcionado o inválido.
+        '500':
+          description: Error interno del servidor.
+
+  /transportes:
+    get:
+      summary: Obtener todos los transportes
+      description: |
+        Retorna la lista de empresas de transporte disponibles en el sistema.
+        Requiere autenticación y validación de IP.
+      tags:
+        - Transportes
+      responses:
+        '200':
+          description: Petición exitosa.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  # Caso 1: Array directo con datos
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/Transporte'
+                  # Caso 2: Objeto vacío o mensaje (cuando no hay datos)
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "No se encontraron transportes"
+                      data:
+                        type: array
+                        items: {}
+                        example: []
+        '401':
+          description: No autorizado. Token faltante o inválido.
+        '403':
+          description: Prohibido. Falló la validación de IP.
+        '500':
+          description: Error interno del servidor.
+  
+  /products:
+    post:
+      summary: Buscar productos (Filtro por Categoría o Vehículo)
+      description: |
+        Retorna productos compatibles desde 3 bases de datos (Automarco, Autotec, Gabtec).
+        
+        **Modos de búsqueda:**
+        1. **Por Categoría:** Enviar solo `cla_id`.
+        2. **Por Vehículo:** Enviar `cla_id`, `marca_id`, `modelo_id`, `cili_id` y `agno`.
+        las siguientes ID´s son universales y puede enviarse sole el cla_id 2, 9, 12, 15, 16, 18, 22, 23, 25, 31, 37, 48, 49, 54
+      tags:
+        - Productos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cla_id
+              properties:
+                cla_id:
+                  type: integer
+                  description: ID de la clasificación (Categoría). Obligatorio.
+                  example: 10
+                
+                marca_id:
+                  type: integer
+                  description: ID de la marca del vehículo.
+                  example: 14
+                modelo_id:
+                  type: integer
+                  description: ID del modelo del vehículo.
+                  example: 550
+                cili_id:
+                  type: integer
+                  description: ID de la cilindrada.
+                  example: 5
+                agno:
+                  type: integer
+                  description: Año del vehículo.
+                  example: 2022
+      responses:
+        '200':
+          description: Resultados encontrados.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Producto'
+        '400':
+          description: Faltan parámetros obligatorios.
+        '401':
+          description: Token no proporcionado o inválido.
+        '500':
+          description: Error interno del servidor.
+
+  /pedidos:
+    post:
+      summary: Crear Pedido Unificado (Multi-Empresa)
+      description: |
+
+        Este endpoint **ESCRIBE** datos reales en la API y DMZ 
+        
+        **Funcionalidad:**
+        - Permite pedidos mixtos (pedidos multiempresa).
+        - **Validación Logística:** Verifica que todas las sucursales indicadas en el pedido tengan la misma dirección.
+        - **Validación Estricta:** Si una sucursal no existe, rechaza el pedido.
+        
+        *Nota: El RUT del cliente se obtiene automáticamente del Token de autenticación.*
+      tags:
+        - Pedidos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - productos
+                - tran_id
+              properties:
+                tran_id:
+                  type: string
+                  example: "2"
+                tran_nombre:
+                  type: string
+                  example: "RETIRA CLIENTE"
+                sucursales:
+                  type: object
+                  description: Códigos de sucursal (sec) por empresa.
+                  properties:
+                    AUTOMARCO: { type: string, example: "0" }
+                    GABTEC: { type: string, example: "0" }
+
+                productos:
+                  type: array
+                  description: Lista de productos.
+                  items:
+                    type: object
+                    required:
+                      - sku
+                      - cantidad
+                    properties:
+                      sku: 
+                        type: string
+                        description: Código del producto
+                        example: "70012-6"
+                      cantidad: 
+                        type: integer
+                        description: Cantidad a comprar
+                        example: 10
+                  example:
+                    - sku: "70012-6"
+                      cantidad: 10
+                    - sku: "10328-4"
+                      cantidad: 10
+
+      responses:
+        '201':
+          description: Pedido Creado Exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PedidoResponse'
+        '400':
+          description: Error de Validación (Logística o Sucursal)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "No se pudo procesar el pedido" }
+                  error_detail: { type: string, example: "Error: La sucursal código 1 para gabtec no existe o no esta creada" }
+        '401':
+          description: No autorizado
+        '500':
+          description: Error interno
+  /sucursales:
+    get:
+      summary: Obtener sucursales del cliente
+      description: |
+        Recupera las direcciones de despacho y códigos de sucursal del cliente logueado.
+        
+        El sistema consulta las 4 bases de datos (Automarco, Gabtec, Autotec, HD) y devuelve los resultados agrupados por empresa.
+        
+        **Requiere:** Token de autenticación (el RUT se extrae del token).
+      tags:
+        - sucursales
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Listado de sucursales obtenido exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SucursalesResponse'
+        '401':
+          description: Token inválido o expirado.
+        '500':
+          description: Error interno del servidor.
