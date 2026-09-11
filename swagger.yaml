@@ -156,24 +156,27 @@ components:
     PedidoResponse:
       type: object
       properties:
-        detalle_pedido:
-          type: object
-          properties:
-            pedido:
-              type: string
-              description: Formato RUT Vendedor - Correlativo
-              example: "93-139965"
-            transporte:
-              type: string
-              example: "RETIRA CLIENTE"
-            id_transporte:
-              type: string
-              description: ID del transporte como string
-              example: "2"
-            id_interno:
-              type: integer
-              description: ID autoincremental de la tabla pedidos_api
-              example: 21
+        pedidos:
+          type: array
+          description: >
+            Un elemento por cada empresa involucrada en el pedido (un pedido
+            multiempresa genera un correlativo y una cabecera independiente
+            por empresa; GABTEC y FRENOS mezclados se fusionan en un solo
+            pedido "UNIFICADO").
+          items:
+            type: object
+            properties:
+              empresa:
+                type: string
+                example: "AUTOTEC"
+              pedido:
+                type: string
+                description: Formato RUT Vendedor - Correlativo
+                example: "93-139965"
+              id_interno:
+                type: integer
+                description: ID autoincremental de la tabla pedidos_api
+                example: 21
         datos_cliente:
           type: object
           properties:
@@ -526,13 +529,17 @@ paths:
       summary: Crear Pedido Unificado (Multi-Empresa)
       description: |
 
-        Este endpoint **ESCRIBE** datos reales en la API y DMZ 
-        
+        Este endpoint **ESCRIBE** datos reales en la API y DMZ
+
         **Funcionalidad:**
-        - Permite pedidos mixtos (pedidos multiempresa).
+        - Permite pedidos mixtos (pedidos multiempresa): los productos se agrupan por
+          empresa y se genera un pedido (cabecera + correlativo + reserva en su propia
+          tabla DMZ) independiente por cada una. GABTEC y FRENOS mezclados en el mismo
+          pedido se fusionan en un solo pedido "UNIFICADO", ya que comparten la misma
+          tabla DMZ.
         - **Validación Logística:** Verifica que todas las sucursales indicadas en el pedido tengan la misma dirección.
         - **Validación Estricta:** Si una sucursal no existe, rechaza el pedido.
-        
+
         *Nota: El RUT del cliente se obtiene automáticamente del Token de autenticación.*
       tags:
         - Pedidos

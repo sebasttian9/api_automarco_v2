@@ -61,16 +61,18 @@ async function generarToken() {
         ];
         
         let nombreCliente = "";
+        let cli_id = null;
         let encontrado = false;
 
         for (const dbName of basesDeDatos) {
             try {
                 // intenta buscar en cada base de datos
-                const sqlCheck = `SELECT cli_razon_social FROM ${dbName}.tbl_clientes WHERE cli_rut = ?`; 
+                const sqlCheck = `SELECT cli_razon_social, cli_id FROM ${dbName}.tbl_clientes WHERE cli_rut = ?`; 
                 const [rows] = await connection.execute(sqlCheck, [rutInput]);
 
                 if (rows.length > 0) {
                     nombreCliente = rows[0].cli_razon_social;
+                    cli_id = rows[0].cli_id;
                     encontrado = true;
                     break; // si se encuentra se cierra el bucle
                 }
@@ -104,7 +106,8 @@ async function generarToken() {
         // genera token
         const payload = { 
             rut: rutInput,
-            nombre: nombreCliente
+            nombre: nombreCliente,
+            cli_id: cli_id
         };
 
         const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '365d' });

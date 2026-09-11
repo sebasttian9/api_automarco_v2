@@ -246,32 +246,30 @@ try {
   } catch (error) { console.error(error); return null; }
 };
 
-// calcula el correlativo
-const obtenerCorrelativo = async () => {
-    try {
-        //consultar máximo en la API nueva
-        const [resApi] = await connection.execute(`SELECT MAX(pedcorint) as maximo FROM bd_api_automarco.tbl_pedidos`);
-        const maxApi = resApi[0]?.maximo || 0;
-        
-        //consultar máximos en dmz
-        const [resAuto] = await connection.execute(`SELECT MAX(PEDCORINT) as maximo FROM bd_hautomarco.tbl_pedidos WHERE PEDVENRUT = 93`);
-        const [resGab] = await connection.execute(`SELECT MAX(PEDCORINT) as maximo FROM bd_automarco.tbl_pedidos WHERE PEDVENRUT = 93`);
-        const [resFrenos] = await connection.execute(`SELECT MAX(PEDCORINT) as maximo FROM bd_automarco.tbl_pedidos WHERE PEDVENRUT = 94`);
-        const [resHD] = await connection.execute(`SELECT MAX(PEDCORINT) as maximo FROM bd_hdautomarco.tbl_pedidos WHERE PEDVENRUT = 93`);
-        const [resAutotec] = await connection.execute(`SELECT MAX(PEDCORINT) as maximo FROM bd_autotec.tbl_pedidos WHERE PEDVENRUT = 93`);
+// mapa de cada empresa a su tabla DMZ y su namespace de correlativo (PEDVENRUT)
+const MAPA_DMZ_EMPRESA = {
+  AUTOMARCO: { tabla: "bd_hautomarco.tbl_pedidos", pedvenrut: 93 },
+  AUTOTEC:   { tabla: "bd_autotec.tbl_pedidos",    pedvenrut: 93 },
+  HD:        { tabla: "bd_hdautomarco.tbl_pedidos", pedvenrut: 93 },
+  GABTEC:    { tabla: "bd_automarco.tbl_pedidos",   pedvenrut: 93 },
+  UNIFICADO: { tabla: "bd_automarco.tbl_pedidos",   pedvenrut: 93 },
+  FRENOS:    { tabla: "bd_automarco.tbl_pedidos",   pedvenrut: 94 },
+};
 
-        //obtener el valor más alto histórico
-        const techoMaximo = Math.max(
-            maxApi, 
-            resAuto[0]?.maximo || 0, 
-            resGab[0]?.maximo || 0, 
-            resFrenos[0]?.maximo || 0, 
-            resHD[0]?.maximo || 0, 
-            resAutotec[0]?.maximo || 0
+// calcula el correlativo propio de una empresa, tomando el máximo de SU tabla DMZ
+const obtenerCorrelativoPorEmpresa = async (empresa) => {
+    try {
+        const config = MAPA_DMZ_EMPRESA[empresa];
+        if (!config) throw new Error(`Empresa no reconocida para correlativo: ${empresa}`);
+
+        const [result] = await connection.execute(
+            `SELECT MAX(PEDCORINT) as maximo FROM ${config.tabla} WHERE PEDVENRUT = ?`,
+            [config.pedvenrut]
         );
-        
-        console.log(`🔢 Correlativo generado: ${techoMaximo + 1}`);
-        return techoMaximo + 1; 
+
+        const correlativo = (result[0]?.maximo || 0) + 1;
+        console.log(`🔢 Correlativo ${empresa} generado: ${correlativo}`);
+        return correlativo;
 
     } catch (error) {
         console.error("Error correlativo:", error);
@@ -298,83 +296,50 @@ const getOCdefinitiva = async (empresa, pedcorint, pedvenrut) => {
 }
 
 
-const insertPedido = async (db, data, productos) => {
-  //inserta pedido en base pedidos_api
+// inserta la cabecera + detalle de UN grupo (una empresa) del pedido, y reserva
+// su correlativo en la tabla DMZ correspondiente
+const insertPedidoEmpresa = async (db, grupo) => {
+    const config = MAPA_DMZ_EMPRESA[grupo.empresa];
+    if (!config) throw new Error(`Empresa no reconocida al insertar pedido: ${grupo.empresa}`);
+
+    // inserta la reserva del correlativo en la DMZ de esta empresa.
+    // OJO: no se fija PEDESTPRO -> queda en su default (2). El cron que integra
+    // estos pedidos en el DMZ ignora las filas con PEDESTPRO=2 y recien las toma
+    // cuando otro proceso las pasa a 0; fijarlo aca las procesaria antes de tiempo.
+    await db.execute(
+        `INSERT INTO ${config.tabla} (PEDVENRUT, PEDVENSEC, PEDCORINT, PEDFCH, PEDEST, PEDCLIRUT, PEDCLISEC) VALUES (?, 0, ?, NOW(), 0, ?, ?)`,
+        [config.pedvenrut, grupo.pedcorint, grupo.rut, grupo.cli_sec]
+    );
+
+    //inserta cabecera del pedido en base pedidos_api
     const sqlHeader = `
         INSERT INTO bd_api_automarco.tbl_pedidos
-        (
-            fecha, estado, pedvenrut, pedcorint, unificado, tran_nombre, cli_rut,
-            cli_sec_automarco, cli_conven_automarco,
-            cli_sec_autotec, cli_conven_autotec,
-            cli_sec_hd, cli_conven_hd,
-            cli_sec_gabtec, cli_conven_gabtec
-        ) 
-        VALUES (NOW(), 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (fecha, estado, empresa, pedvenrut, pedcorint, tran_nombre, cli_rut, cli_sec, cli_conven)
+        VALUES (NOW(), 0, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const valuesHeader = [
-        data.pedvenrut, data.pedcorint, data.unificado, data.tran_nombre, data.rut,
-        data.secAutomarco, data.convenAutomarco,
-        data.secAutotec, data.convenAutotec,
-        data.secHD, data.convenHD,
-        data.secGabtec, data.convenGabtec
+        grupo.empresa, config.pedvenrut, grupo.pedcorint, grupo.tran_nombre, grupo.rut,
+        grupo.cli_sec, grupo.cli_conven
     ];
 
     const [resultHeader] = await db.execute(sqlHeader, valuesHeader);
     const idPedidoGenerado = resultHeader.insertId;
 
-   //inserta detalle del pedido en base pedidos_api
-    if (productos && productos.length > 0) {
+    //inserta detalle del pedido en base pedidos_api
+    if (grupo.productos && grupo.productos.length > 0) {
         const sqlDetalle = `
             INSERT INTO bd_api_automarco.tbl_pedidos_detalle (pedido_id, prod_id, cantidad, empresa, pedcorint)
             VALUES (?, ?, ?, ?, ?)
         `;
-        for (const prod of productos) {
+        for (const prod of grupo.productos) {
             await db.execute(sqlDetalle, [
-                idPedidoGenerado, prod.codigo, prod.cantidad, prod.empresa, data.pedcorint
+                idPedidoGenerado, prod.codigo, prod.cantidad, prod.empresa, grupo.pedcorint
             ]);
         }
     }
 
-    //inserta pedido dmz
-
-    // AUTOMARCO
-    if (data.secAutomarco) {
-        await db.execute(
-            `INSERT INTO bd_hautomarco.tbl_pedidos (PEDVENRUT, PEDVENSEC, PEDCORINT, PEDFCH, PEDEST, PEDCLIRUT, PEDCLISEC) VALUES (93, 0, ?, NOW(), 0, ?, ?)`,
-            [data.pedcorint, data.rut, data.secAutomarco]
-        );
-    }
-
-    // AUTOTEC
-    if (data.secAutotec) {
-        await db.execute(
-            `INSERT INTO bd_autotec.tbl_pedidos (PEDVENRUT, PEDVENSEC, PEDCORINT, PEDFCH, PEDEST, PEDCLIRUT, PEDCLISEC) VALUES (93, 0, ?, NOW(), 0, ?, ?)`,
-            [data.pedcorint, data.rut, data.secAutotec]
-        );
-    }
-
-    //  HD 
-    if (data.secHD) {
-        await db.execute(
-            `INSERT INTO bd_hdautomarco.tbl_pedidos (PEDVENRUT, PEDVENSEC, PEDCORINT, PEDFCH, PEDEST, PEDCLIRUT, PEDCLISEC) VALUES (93, 0, ?, NOW(), 0, ?, ?)`,
-            [data.pedcorint, data.rut, data.secHD]
-        );
-    }
-
-    //  GABTEC
-    if (data.secGabtec) {
-      //si todos son frenos inserta en 94, si no en 93
-        const esSoloFrenos = productos.some(p => p.empresa === 'FRENOS') && !productos.some(p => p.empresa === 'GABTEC');
-        const rutVendedor = esSoloFrenos ? 94 : 93;
-
-        await db.execute(
-            `INSERT INTO bd_automarco.tbl_pedidos (PEDVENRUT, PEDVENSEC, PEDCORINT, PEDFCH, PEDEST, PEDCLIRUT, PEDCLISEC) VALUES (?, 0, ?, NOW(), 0, ?, ?)`,
-            [rutVendedor, data.pedcorint, data.rut, data.secGabtec]
-        );
-    }
-
-    return idPedidoGenerado;
+    return { empresa: grupo.empresa, pedido: `${config.pedvenrut}-${grupo.pedcorint}`, id_interno: idPedidoGenerado };
 };
 
 export {
@@ -385,7 +350,8 @@ export {
   obtenerNombreTransporte,
   obtenerCondpagoPorSucursal,
   obtenerDireccionSucursal,
-  obtenerCorrelativo,
+  MAPA_DMZ_EMPRESA,
+  obtenerCorrelativoPorEmpresa,
   getOCdefinitiva,
-  insertPedido,
+  insertPedidoEmpresa,
 };

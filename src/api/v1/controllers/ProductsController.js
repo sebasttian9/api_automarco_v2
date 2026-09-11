@@ -1,8 +1,8 @@
 import {
   getStockProducts,
   getOCdefinitiva,
-  insertPedido,
-  obtenerCorrelativo,
+  insertPedidoEmpresa,
+  obtenerCorrelativoPorEmpresa,
   obtenerCondpagoPorSucursal,
   validarPedidoEmpresa,
   obtenerNombreTransporte,
@@ -110,10 +110,6 @@ const insertarPedidosRepSolController = async (req, res) => {
         }
 
         const validaCampo = (v) => (v === undefined || v === null || v === "" || v === "null") ? null : v;
-        const todosSonFrenos = body.productos.every(p => p.empresa === 'FRENOS');
-        const pedvenrut = todosSonFrenos ? 94 : 93; 
-        const pedcorint = await obtenerCorrelativo(); 
-        const unificado = body.unificado ? 1 : 0;
 
         // sacar el nombre del transporte
         let tran_nombre = validaCampo(body.tran_nombre);
@@ -167,41 +163,62 @@ const insertarPedidosRepSolController = async (req, res) => {
         const convenHD        = secHD        ? await obtenerCondpagoPorSucursal(db, rut, secHD, "HD") : null;
         const convenGabtec    = secGabtec    ? await obtenerCondpagoPorSucursal(db, rut, secGabtec, "GABTEC") : null;
 
-       
-        const datosCabecera = {
-            rut, pedvenrut, pedcorint, tran_nombre, unificado,
-            secAutomarco, convenAutomarco,
-            secAutotec, convenAutotec,
-            secHD, convenHD,
-            secGabtec, convenGabtec
+        // sucursal/convenio a usar segun la empresa del grupo (FRENOS comparte cliente con GABTEC)
+        const SUCURSAL_POR_EMPRESA = {
+            AUTOMARCO: { cli_sec: secAutomarco, cli_conven: convenAutomarco },
+            AUTOTEC:   { cli_sec: secAutotec, cli_conven: convenAutotec },
+            HD:        { cli_sec: secHD, cli_conven: convenHD },
+            GABTEC:    { cli_sec: secGabtec, cli_conven: convenGabtec },
+            FRENOS:    { cli_sec: secGabtec, cli_conven: convenGabtec },
+            UNIFICADO: { cli_sec: secGabtec, cli_conven: convenGabtec },
         };
-        
-        const productosParaModelo = body.productos.map(p => ({
-            codigo: p.sku, cantidad: p.cantidad, precio: p.precio, empresa: p.empresa   
+
+        // agrupar los productos por su empresa real (ya asignada por validarPedidoEmpresa)
+        const gruposPorEmpresa = {};
+        for (const p of body.productos) {
+            if (!gruposPorEmpresa[p.empresa]) gruposPorEmpresa[p.empresa] = [];
+            gruposPorEmpresa[p.empresa].push(p);
+        }
+
+        // GABTEC y FRENOS comparten la misma tabla DMZ -> se fusionan en un solo pedido UNIFICADO
+        if (gruposPorEmpresa.GABTEC && gruposPorEmpresa.FRENOS) {
+            gruposPorEmpresa.UNIFICADO = [...gruposPorEmpresa.GABTEC, ...gruposPorEmpresa.FRENOS];
+            delete gruposPorEmpresa.GABTEC;
+            delete gruposPorEmpresa.FRENOS;
+        }
+
+        const productosParaModelo = (productos) => productos.map(p => ({
+            codigo: p.sku, cantidad: p.cantidad, precio: p.precio, empresa: p.empresa
         }));
 
-        // insertar pedido dmz y api
-        const idPedido = await insertPedido(db, datosCabecera, productosParaModelo);
+        // insertar un pedido (cabecera + detalle + reserva dmz) por cada empresa presente
+        const pedidos = [];
+        for (const [empresa, productosGrupo] of Object.entries(gruposPorEmpresa)) {
+            const pedcorint = await obtenerCorrelativoPorEmpresa(empresa);
+            const sucursal = SUCURSAL_POR_EMPRESA[empresa] || {};
 
-    
+            const pedido = await insertPedidoEmpresa(db, {
+                empresa, pedcorint, rut, tran_nombre,
+                cli_sec: sucursal.cli_sec, cli_conven: sucursal.cli_conven,
+                productos: productosParaModelo(productosGrupo),
+            });
+
+            pedidos.push(pedido);
+        }
+
         await db.commit();
 
         res.status(201).json({
             message: "Pedido creado exitosamente",
-            detalle_pedido: {
-                pedido: `${pedvenrut}-${pedcorint}`, 
-                transporte: tran_nombre,
-                id_transporte: body.tran_id,
-                id_interno: idPedido
-            },
-            datos_cliente: { 
-                rut: rut, 
+            pedidos,
+            datos_cliente: {
+                rut: rut,
                 condicion_pago: { automarco: convenAutomarco, gabtec: convenGabtec, autotec: convenAutotec, hd: convenHD },
                 direccion_despacho: direccionFinal,
                 comuna: comunaFinal
             },
             detalle_productos: body.productos.map(p => ({
-                sku: p.sku, descripcion: p.titulo || "Producto", cantidad: p.cantidad, precio_unitario: p.precio, empresa: p.empresa 
+                sku: p.sku, descripcion: p.titulo || "Producto", cantidad: p.cantidad, precio_unitario: p.precio, empresa: p.empresa
             })),
         });
 
