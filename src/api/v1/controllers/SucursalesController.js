@@ -18,18 +18,25 @@ const getSucursalesController = async (req, res) => {
 
  //agrupa las sucursales por empresa
     const sucursalesPorEmpresa = resultados.reduce((acc, curr) => {
-        const { empresa, codigo, direccion, comuna } = curr; 
-        
+        const { empresa, codigo, direccion, comuna, descuento, descuento_frenos } = curr;
+
         if (!acc[empresa]) {
             acc[empresa] = [];
         }
-        
+
         if (direccion) {
-            acc[empresa].push({ 
-                codigo: codigo, 
+            const sucursal = {
+                codigo: codigo,
                 direccion: direccion.trim(),
-                comuna: comuna ? comuna.trim() : "" // validación extra por seguridad
-            });
+                comuna: comuna ? comuna.trim() : "", // validación extra por seguridad
+                descuento: descuento
+            };
+
+            if (empresa === "GABTEC") {
+                sucursal.descuento_frenos = descuento_frenos;
+            }
+
+            acc[empresa].push(sucursal);
         }
         
         return acc;

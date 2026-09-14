@@ -94,8 +94,20 @@ components:
           example: "Amortiguador Gabriel"
         prod_precio:
           type: integer
-          description: Precio unitario.
+          description: Precio de lista.
           example: 48880
+        descuento:
+          type: integer
+          description: |
+            Solo presente si el request incluyó `sucursales`. Porcentaje de
+            descuento del cliente para la sucursal indicada (0 si no aplica).
+          example: 10
+        precio_final:
+          type: integer
+          description: |
+            Solo presente si el request incluyó `sucursales`. Precio ya con el
+            descuento aplicado; igual a `prod_precio` si el descuento es 0.
+          example: 43992
         prod_stock:
           type: integer
           description: Stock disponible.
@@ -476,6 +488,14 @@ paths:
         1. **Por Categoría:** Enviar solo `cla_id`.
         2. **Por Vehículo:** Enviar `cla_id`, `marca_id`, `modelo_id`, `cili_id` y `agno`.
         las siguientes ID´s son universales y puede enviarse sole el cla_id 2, 9, 12, 15, 16, 18, 22, 23, 25, 31, 37, 48, 49, 54
+
+        **Precio con descuento (opcional):** si se envía `sucursales`, cada producto
+        incluye además `descuento` y `precio_final` calculados contra la sucursal de
+        esa empresa (según el rut del token). El código de sucursal debe coincidir
+        con el `codigo` retornado por `/sucursales` para esa empresa (no son
+        equivalentes entre empresas). Si no se envía `sucursales`, o la sucursal
+        indicada no existe para el cliente en esa empresa, se retorna solo el precio
+        de lista (`prod_precio`), igual que antes.
       tags:
         - Productos
       requestBody:
@@ -491,7 +511,7 @@ paths:
                   type: integer
                   description: ID de la clasificación (Categoría). Obligatorio.
                   example: 10
-                
+
                 marca_id:
                   type: integer
                   description: ID de la marca del vehículo.
@@ -508,6 +528,22 @@ paths:
                   type: integer
                   description: Año del vehículo.
                   example: 2022
+                sucursales:
+                  type: object
+                  description: |
+                    Opcional. Código de sucursal por empresa (ver /sucursales), usado
+                    para calcular el precio con descuento. Si se omite, se retorna
+                    precio de lista.
+                  properties:
+                    AUTOMARCO:
+                      type: string
+                      example: "12"
+                    AUTOTEC:
+                      type: string
+                      example: "3"
+                    GABTEC:
+                      type: string
+                      example: "0"
       responses:
         '200':
           description: Resultados encontrados.
@@ -609,6 +645,150 @@ paths:
           description: No autorizado
         '500':
           description: Error interno
+
+  /ordenes-disam:
+    post:
+      summary: Crear orden desde Mercado Libre / Daito (Disam)
+      description: |
+        Este endpoint **ESCRIBE** datos reales en la API y DMZ.
+
+        A diferencia de `/pedidos`, estas órdenes no pertenecen a un cliente
+        real autenticado: representan ventas de Mercado Libre y se registran
+        contra una cuenta fija por empresa. Inserta en `bd_daito_disam` (no en
+        `bd_api_automarco`).
+      tags:
+        - Pedidos
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - productos
+                - cabecera
+              properties:
+                productos:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      codigo: { type: string, example: "72204-9" }
+                      cantidad: { type: integer, example: 2 }
+                cabecera:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      numero_orden: { type: string, example: "2000012345678" }
+                      etiqueta_zpl: { type: string, description: "Etiqueta de envío en formato ZPL." }
+      responses:
+        '200':
+          description: Orden creada.
+        '400':
+          description: Faltan productos o cabecera.
+        '500':
+          description: Error interno del servidor.
+
+  /buscar-prod/{id}:
+    get:
+      summary: Ficha de un producto por SKU
+      description: Busca el producto en las 5 empresas y agrega sus equivalencias OEM.
+      tags:
+        - Productos
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          example: "72204-9"
+      responses:
+        '200':
+          description: Producto encontrado.
+        '404':
+          description: Producto no encontrado.
+        '401':
+          description: No autorizado.
+
+  /cod-publicacion/{id}:
+    get:
+      summary: Info de una publicación de Mercado Libre
+      description: Búsqueda parcial (LIKE) por código de publicación en `tbl_mercado_libre`.
+      tags:
+        - Productos
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+          example: "TR000001"
+      responses:
+        '200':
+          description: Publicación(es) encontrada(s).
+        '404':
+          description: No encontrado.
+        '401':
+          description: No autorizado.
+
+  /dimensiones/{producto}:
+    get:
+      summary: Volumetría/peso de un producto (WMS)
+      tags:
+        - Productos
+      parameters:
+        - in: path
+          name: producto
+          required: true
+          schema: { type: string }
+          example: "72204-9"
+      responses:
+        '200':
+          description: Datos de volumetría encontrados.
+        '404':
+          description: No encontrado.
+        '401':
+          description: No autorizado.
+
+  /recetas:
+    get:
+      summary: Listado paginado de recetas de compatibilidad (Mercado Libre)
+      tags:
+        - Productos
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500 }
+      responses:
+        '200':
+          description: Listado paginado.
+        '401':
+          description: No autorizado.
+
+  /imagenes-productos:
+    get:
+      summary: Listado paginado de imágenes de productos (Daito/Disam)
+      tags:
+        - Productos
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 500 }
+        - in: query
+          name: empresa
+          description: "'gabtec', 'autotec' o 'automarco' (opcional)."
+          schema: { type: string }
+      responses:
+        '200':
+          description: Listado paginado.
+        '401':
+          description: No autorizado.
+
   /sucursales:
     get:
       summary: Obtener sucursales del cliente

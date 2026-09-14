@@ -15,11 +15,13 @@ const getAllProductsAplications1 = async (req, res) => {
     
  
     const token = authHeader.replace('Bearer ', '').trim();
+    const rut = req.user && req.user.rut;
+    const sucursales = req.body.sucursales || null;
 
 
     if (req.existe_clasificacion) {
       // busqueda solo por clasificacion
-      
+
       const { order_by, page, limits, cla_id } = req.body;
 
       // Validaciones
@@ -27,13 +29,15 @@ const getAllProductsAplications1 = async (req, res) => {
         return res.status(400).json({ message: "Categoria (cla_id) es requerida!" });
       }
 
- 
+
       const products = await getProductsCategory(
-        token,    
+        token,
         order_by,
         limits,
         page,
-        cla_id
+        cla_id,
+        rut,
+        sucursales
       );
 
       const productsImg = await prepareHateoas(products);
@@ -63,7 +67,7 @@ const getAllProductsAplications1 = async (req, res) => {
 
 
       const products = await getProducts(
-        token,    
+        token,
         order_by,
         limits,
         page,
@@ -71,7 +75,9 @@ const getAllProductsAplications1 = async (req, res) => {
         marca_id,
         modelo_id,
         cili_id,
-        agno
+        agno,
+        rut,
+        sucursales
       );
 
       const productsImg = await prepareHateoas(products);

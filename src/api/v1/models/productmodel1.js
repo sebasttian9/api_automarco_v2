@@ -1,7 +1,29 @@
 import connection from '../../../../config/bdPedidosApi.js';
 import obtenerPermisos from '../helpers/verificapermiso.js';
+import { obtenerDescuentoPorSucursal } from './productsModel.js';
 
 
+
+// Aplica descuento por sucursal a una lista de productos ya resuelta (con empresa
+// asignada). Si no se entrega rut o sucursales, no se toca nada (precio de lista).
+const aplicarDescuentosPorSucursal = async (productos, rut, sucursales) => {
+  return Promise.all(productos.map(async (p) => {
+    const { prod_estado2, ...producto } = p;
+
+    if (!rut || !sucursales) return producto;
+
+    const cli_sec = sucursales[p.empresa] || null;
+    const esFrenos = p.empresa === "GABTEC" && prod_estado2 == 1;
+
+    const descuento = await obtenerDescuentoPorSucursal(p.empresa, rut, cli_sec, esFrenos);
+    const precioBase = Number(p.prod_precio);
+    const precio_final = descuento > 0
+      ? Math.round(precioBase - (precioBase * (descuento / 100)))
+      : precioBase;
+
+    return { ...producto, descuento, precio_final };
+  }));
+};
 
 const getProducts = async (
   token,
@@ -12,7 +34,9 @@ const getProducts = async (
   marca = 0,
   modelo = 0,
   cilindrada = 0,
-  agno = 0
+  agno = 0,
+  rut = null,
+  sucursales = null
 ) => {
   const db = await connection; 
   try {
@@ -83,12 +107,14 @@ const getProducts = async (
     //   "automarco" + Productos_automarco
     // );
 
-    // Unir resultados 
+    // Unir resultados
     resultado_final = [].concat(
       Productos_automarco || [],
       productos_autotec || [],
       productos_gabtec || []
     );
+
+    resultado_final = await aplicarDescuentosPorSucursal(resultado_final, rut, sucursales);
 
     return resultado_final;
 
@@ -99,11 +125,13 @@ const getProducts = async (
 };
 
 const getProductsCategory = async (
-  token, 
+  token,
   order_by = "nombre__ASC",
   limits = 3,
   page = 1,
-  cla_id = 0
+  cla_id = 0,
+  rut = null,
+  sucursales = null
 ) => {
   const db = await connection;
   try {
@@ -156,6 +184,8 @@ const getProductsCategory = async (
       productos_autotec || [],
       productos_gabtec || []
     );
+
+    resultado_final = await aplicarDescuentosPorSucursal(resultado_final, rut, sucursales);
 
     return resultado_final;
 
@@ -214,10 +244,10 @@ const consultaPorEmpresa = async (
               LEFT JOIN automarc_automarco.tbl_marcas_2 h on f.marca_id = h.marca_id 
               LEFT join autotec_ecom.tbl_combustible as l on f.id_combustible = l.id_combustible 
               LEFT JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id 
-              LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id 
-              LEFT JOIN autotec_ecom.tbl_productos_agnos i on f.pm_id = i.pm_id 
-              WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id = ? and f.marca_id = ? 
-              and g.mod_id = ? and i.prod_agno= ? and x.cilin_id = ? 
+              LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
+              LEFT JOIN autotec_ecom.tbl_productos_agnos i on f.pm_id = i.pm_id
+              WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id = ? and f.marca_id = ?
+              and g.id_mod = ? and i.prod_agno= ? and x.cilin_id = ?
               GROUP BY a.prod_id`,
         [cla_id, marca, modelo, agno, cilindrada]
       );
@@ -236,6 +266,7 @@ const consultaPorEmpresa = async (
                     j.espe_nombre,
                     a.prod_img,
                     a.prod_stock,
+                    a.prod_estado2,
                     e.marca_nombre,
                     g.mod_id,
                     c.ubi_nombre,
@@ -246,18 +277,18 @@ const consultaPorEmpresa = async (
                     'GABTEC' as empresa,
                     k.marca_nombre as marca_producto,
                     f.version
-            FROM gabteccl_sitbdd1978.tbl_productos AS a 
-            LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id 
-            LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id             
-            LEFT join gabteccl_sitbdd1978.tbl_productos_modelos_2 f on a.prod_id = f.prod_id 
-            LEFT JOIN automarc_automarco.tbl_marcas_2 e on f.marca_id = e.marca_id 
-            LEFT join gabteccl_sitbdd1978.tbl_marcas_productos k on a.marca_id = k.marca_id 
-            LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id 
-            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id 
+            FROM gabteccl_sitbdd1978.tbl_productos AS a
+            LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id
+            LEFT join gabteccl_sitbdd1978.tbl_productos_modelos_2 f on a.prod_id = f.prod_id
+            LEFT JOIN automarc_automarco.tbl_marcas_2 e on f.marca_id = e.marca_id
+            LEFT join gabteccl_sitbdd1978.tbl_marcas_productos k on a.marca_id = k.marca_id
+            LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
             left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
-            WHERE (a.prod_estado = 1 or a.prod_estado2 = 1) and d.cla_id = ? and f.marca_id = ? and g.mod_id = ? 
+            WHERE (a.prod_estado = 1 or a.prod_estado2 = 1) and d.cla_id = ? and f.marca_id = ? and g.id_mod = ?
             and i.prod_agno= ? `,
         [cla_id, marca, modelo, agno]
       );
@@ -301,8 +332,8 @@ const consultaPorEmpresa = async (
           LEFT JOIN automarc_automarco.tbl_subfamilia y on y.sf_id = a.sf_id 
           LEFT JOIN automarc_automarco.tbl_combustible z on z.id_combustible = f.id_combustible 
           LEFT JOIN automarc_automarco.tbl_productos_agnos i on f.pm_id = i.pm_id 
-          WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id2 = ? and f.marca_id = ? 
-          and g.mod_id = ? and i.prod_agno= ? and x.cilin_id = ? 
+          WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id2 = ? and f.marca_id = ?
+          and g.id_mod = ? and i.prod_agno= ? and x.cilin_id = ?
           GROUP by a.prod_id`,
         [cla_id, marca, modelo, agno, cilindrada]
       );
@@ -373,6 +404,7 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
                     j.espe_nombre,
                     a.prod_img,
                     a.prod_stock,
+                    a.prod_estado2,
                     e.marca_nombre,
                     g.mod_id,
                     c.ubi_nombre,
@@ -383,14 +415,14 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
                     'GABTEC' as empresa,
                     k.marca_nombre as marca_producto,
                     f.version
-            FROM gabteccl_sitbdd1978.tbl_productos AS a 
-            LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id 
-            LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id             
-            LEFT join gabteccl_sitbdd1978.tbl_productos_modelos_2 f on a.prod_id = f.prod_id 
-            LEFT JOIN automarc_automarco.tbl_marcas_2 e on f.marca_id = e.marca_id 
-            LEFT join gabteccl_sitbdd1978.tbl_marcas_productos k on a.marca_id = k.marca_id 
-            LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id 
-            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id 
+            FROM gabteccl_sitbdd1978.tbl_productos AS a
+            LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id
+            LEFT join gabteccl_sitbdd1978.tbl_productos_modelos_2 f on a.prod_id = f.prod_id
+            LEFT JOIN automarc_automarco.tbl_marcas_2 e on f.marca_id = e.marca_id
+            LEFT join gabteccl_sitbdd1978.tbl_marcas_productos k on a.marca_id = k.marca_id
+            LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
             left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id

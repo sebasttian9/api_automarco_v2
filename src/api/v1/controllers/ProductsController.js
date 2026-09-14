@@ -6,7 +6,13 @@ import {
   obtenerCondpagoPorSucursal,
   validarPedidoEmpresa,
   obtenerNombreTransporte,
-  obtenerDireccionSucursal
+  obtenerDireccionSucursal,
+  getProductById,
+  getOemById,
+  getInfoTR,
+  getVolumetriaWms,
+  getAllRecetas,
+  getImagenesProductos
 } from "../models/productsModel.js";
 
 import prepareHateoas from "../helpers/hateoas.js";
@@ -188,7 +194,7 @@ const insertarPedidosRepSolController = async (req, res) => {
         }
 
         const productosParaModelo = (productos) => productos.map(p => ({
-            codigo: p.sku, cantidad: p.cantidad, precio: p.precio, empresa: p.empresa
+            codigo: p.sku, cantidad: p.cantidad, precio: p.precio, descuento: p.descuento, empresa: p.empresa
         }));
 
         // insertar un pedido (cabecera + detalle + reserva dmz) por cada empresa presente
@@ -236,10 +242,134 @@ const insertarPedidosRepSolController = async (req, res) => {
     }
 };
 
+// Portado desde producción (v1): ficha de un producto por SKU + sus equivalencias OEM.
+const getProductbyIdController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: "El parametro id es requerido!" });
+
+    const product = await getProductById(id);
+    const oem = await getOemById(id);
+    const productsImg = await prepareHateoas(product);
+
+    if (productsImg.length > 0) {
+      productsImg[0].oem = oem.length > 0 ? oem : [];
+    }
+
+    if (productsImg.length > 0) {
+      res.status(200).json(productsImg);
+    } else {
+      res.status(404).json({ message: "Producto no encontrado" });
+    }
+  } catch (error) {
+    console.log("error", error);
+    res.status(500).json({ message: "Error interno del servidor", error: error.message });
+  }
+};
+
+// Portado desde producción: info de una publicación de Mercado Libre.
+const getInfoTRController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: "El parametro COD de publicacion es requerido!" });
+
+    const product = await getInfoTR(id);
+
+    if (product.length > 0) {
+      res.status(200).json(product);
+    } else {
+      res.status(404).json({ message: "Producto no encontrado" });
+    }
+  } catch (error) {
+    console.log("error", error);
+    res.status(500).json({ message: "Error interno del servidor", error: error.message });
+  }
+};
+
+// Portado desde producción: volumetría/peso de un producto (para WMS).
+const getVolumetriaWmsController = async (req, res) => {
+  try {
+    const { producto } = req.params;
+    if (!producto) return res.status(400).json({ message: "El parametro COD de producto es requerido!" });
+
+    const product = await getVolumetriaWms(producto);
+
+    if (product.length > 0) {
+      res.status(200).json(product);
+    } else {
+      res.status(404).json({ message: "Producto no encontrado" });
+    }
+  } catch (error) {
+    console.log("error", error);
+    res.status(500).json({ message: "Error interno del servidor", error: error.message });
+  }
+};
+
+// Portado desde producción: listado paginado de recetas de compatibilidad para Mercado Libre.
+const getAllRecetasController = async (req, res) => {
+  try {
+    let page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 500;
+    const offset = (page - 1) * limit;
+
+    const { data, total } = await getAllRecetas(limit, offset);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      info: {
+        total_records: total,
+        total_pages: totalPages,
+        current_page: page,
+        next_page: page < totalPages ? page + 1 : null,
+        prev_page: page > 1 ? page - 1 : null
+      },
+      results: data
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Error al obtener datos", error });
+  }
+};
+
+// Portado desde producción: listado paginado de imágenes de productos (Daito/Disam).
+const getImagenesProductosController = async (req, res) => {
+  try {
+    let page = parseInt(req.query.page) || 1;
+    let limit = parseInt(req.query.limit) || 500;
+    let empresa = req.query.empresa || null;
+
+    if (empresa === 'gabtec') empresa = 10;
+    else if (empresa === 'autotec') empresa = 2;
+    else if (empresa === 'automarco') empresa = 1;
+
+    const offset = (page - 1) * limit;
+
+    const { data, total } = await getImagenesProductos(limit, offset, empresa);
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      info: {
+        total_records: total,
+        total_pages: totalPages,
+        current_page: page,
+        next_page: page < totalPages ? page + 1 : null,
+        prev_page: page > 1 ? page - 1 : null
+      },
+      results: data
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Error al obtener datos", error });
+  }
+};
+
 
 export {
   getStockProductsController,
   getOCdefinitivaController,
-  insertarPedidosRepSolController
+  insertarPedidosRepSolController,
+  getProductbyIdController,
+  getInfoTRController,
+  getVolumetriaWmsController,
+  getAllRecetasController,
+  getImagenesProductosController
 };
 

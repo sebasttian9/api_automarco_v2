@@ -63,6 +63,257 @@ const obtenerEmpresa = async (prod_id) => {
   }
 };
 
+// Portado desde producción (v1): ficha de un producto por SKU, buscando en la
+// empresa a la que pertenece (vía obtenerEmpresa).
+const getProductById = async (prod_id) => {
+  try {
+    let resultado = [];
+    const empresa = await obtenerEmpresa(prod_id);
+
+    if (empresa.length == 0) return [];
+
+    if (empresa[0].empresa == "AUTOTEC") {
+      const [rows] = await connection.execute(
+        `SELECT prod_id, prod_stock, id_prov, prod_nombre, prod_precio, k.marca_nombre, prod_img
+         FROM autotec_ecom.tbl_productos a
+         LEFT JOIN automarc_automarco.tbl_marcas_productos k on a.marca_id = k.marca_id
+         WHERE prod_estado = 1 and prod_id = ?`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "GABTEC") {
+      const [rows] = await connection.execute(
+        `SELECT prod_id, prod_stock, id_prov, prod_nombre, prod_precio, k.marca_nombre, prod_img
+         FROM gabteccl_sitbdd1978.tbl_productos a
+         LEFT JOIN automarc_automarco.tbl_marcas_productos k on a.marca_id = k.marca_id
+         WHERE prod_id = ? and prod_estado = 1;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "FRENOS") {
+      const [rows] = await connection.execute(
+        `SELECT prod_id, prod_stock, id_prov, prod_nombre, prod_precio, k.marca_nombre, prod_img
+         FROM gabteccl_sitbdd1978.tbl_productos a
+         LEFT JOIN automarc_automarco.tbl_marcas_productos k on a.marca_id = k.marca_id
+         WHERE prod_id = ? and prod_estado2 = 1;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "AUTOMARCO") {
+      const [rows] = await connection.execute(
+        `SELECT prod_id, prod_stock, id_prov, prod_nombre, prod_precio, k.marca_nombre, prod_img
+         FROM automarc_automarco.tbl_productos2 a
+         LEFT JOIN automarc_automarco.tbl_marcas_productos k on a.marca_id = k.marca_id
+         where prod_id = ? and prod_estado = 1;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "HD") {
+      const [rows] = await connection.execute(
+        `SELECT prod_id, prod_stock, id_prov, prod_nombre, prod_precio, k.marca_nombre, prod_img
+         FROM autohd_automarcohd.tbl_productos a
+         LEFT JOIN autohd_automarcohd.tbl_marcas_productos k on a.marca_id = k.marca_id
+         where prod_id = ? and prod_estado = 1;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (resultado.length > 0) {
+      resultado[0].empresa = empresa[0].empresa;
+      return resultado;
+    }
+    return [];
+  } catch (error) {
+    console.error("Error al obtener producto por id:", error);
+    return [];
+  }
+};
+
+// Portado desde producción: códigos OEM equivalentes de un producto.
+const getOemById = async (prod_id) => {
+  try {
+    let resultado = [];
+    const empresa = await obtenerEmpresa(prod_id);
+
+    if (empresa.length == 0) return [];
+
+    if (empresa[0].empresa == "AUTOTEC") {
+      const [rows] = await connection.execute(
+        `SELECT a.cod_equivalente, k.marca_nombre FROM autotec_ecom.tbl_prod_equivalente a
+         LEFT JOIN automarc_automarco.tbl_marcas_2 k on a.marca_id = k.marca_id
+         WHERE tipo_equivalencia = 3 and prod_id = ?;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "GABTEC" || empresa[0].empresa == "FRENOS") {
+      const [rows] = await connection.execute(
+        `SELECT a.oem, k.marca_nombre FROM gabteccl_sitbdd1978.tbl_productos_oem_unificado a
+         LEFT JOIN automarc_automarco.tbl_marcas_2 k on a.marca_id = k.marca_id
+         WHERE id_oem_tipo = 3 and prod_id = ?;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "AUTOMARCO") {
+      const [rows] = await connection.execute(
+        `SELECT a.cod_equivalente, k.marca_nombre FROM automarc_automarco.tbl_prod_equivalente a
+         LEFT JOIN automarc_automarco.tbl_marcas_2 k on a.marca_id = k.marca_id
+         WHERE tipo_equivalencia = 3 and prod_id = ?;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    if (empresa[0].empresa == "HD") {
+      const [rows] = await connection.execute(
+        `SELECT a.cod_equivalente, k.marca_nombre FROM autohd_automarcohd.tbl_prod_equivalente a
+         LEFT JOIN autohd_automarcohd.tbl_marcas k on a.marca_id = k.marca_id
+         WHERE id_tipo_equiv = 2 and prod_id = ?;`,
+        [prod_id]
+      );
+      resultado = rows;
+    }
+
+    return resultado;
+  } catch (error) {
+    console.error("Error al obtener OEM:", error);
+    return [];
+  }
+};
+
+// Portado desde producción: info de una publicación de Mercado Libre por
+// código de publicación (búsqueda parcial, como en el original).
+const getInfoTR = async (cod_publicacion) => {
+  try {
+    const [rows] = await connection.execute(
+      `SELECT cod_publicacion, titulo, prod_id_1, prod_id_2, prod_id_3, prod_id_4,
+              img_prod_1, img_prod_2, img_prod_3, img_prod_4
+       FROM gabteccl_sitbdd1978.tbl_mercado_libre where cod_publicacion like ?`,
+      [`%${cod_publicacion}%`]
+    );
+    return rows;
+  } catch (error) {
+    console.error("Error al obtener info TR:", error);
+    return [];
+  }
+};
+
+// Portado desde producción: volumetría/peso de un producto (para WMS).
+const getVolumetriaWms = async (cod_producto) => {
+  try {
+    const codigoLimpio = cod_producto.includes('-') ? cod_producto.replace('-', '') : cod_producto;
+
+    const [rows] = await connection.execute(
+      `SELECT prod_id, descripcion, formato, unidad_medida, unidades_caja,
+              largo, ancho, alto, volumen_producto, peso_producto, peso_embalaje,
+              unidad_medida_caja_master, unidades_caja_master, largo_caja_master,
+              ancho_caja_master, alto_caja_master, volumen_caja_master,
+              peso_caja_master_producto, peso_carton_caja_master
+       FROM automarc_automarco.tbl_volumetria WHERE prod_id = ?`,
+      [codigoLimpio]
+    );
+    return rows;
+  } catch (error) {
+    console.error("Error al obtener volumetria:", error);
+    return [];
+  }
+};
+
+// Portado desde producción: listado paginado de "recetas" de compatibilidad
+// para Mercado Libre (Gabtec/HD).
+const getAllRecetas = async (limit, offset) => {
+  try {
+    const [countResult] = await connection.execute(
+      `SELECT COUNT(*) as total FROM gabteccl_sitbdd1978.tbl_mercado_libre a
+       left join automarc_automarco.tbl_marcas_2 b on a.marca_id = b.marca_id
+       left join gabteccl_sitbdd1978.tbl_marcas_productos as d on a.marca_pub=d.marca_id
+       LEFT join gabteccl_mlibre.tbl_publicaciones c on a.cod_publicacion = c.cod_publicacion
+       where a.id_empresa in (10,14);`
+    );
+    const total = countResult[0].total;
+
+    const [rows] = await connection.query(
+      `SELECT REPLACE(a.cod_publicacion, 'TR', 'DSM') AS cod_disam, CASE
+        WHEN a.id_empresa = 10 THEN 'Gabtec'
+        WHEN a.id_empresa = 1  THEN 'Automarco'
+        WHEN a.id_empresa = 2  THEN 'Autotec'
+        WHEN a.id_empresa = 6  THEN 'HD'
+        ELSE a.id_empresa
+        END AS nombre_empresa, e.nombre_relacion, b.marca_nombre, a.mod_id, d.marca_nombre marca_producto,
+        a.agno_ini, a.agno_ter, prod_id_1, gabtec_stock_prod_1, img_prod_1, prod_id_2, gabtec_stock_prod_2,
+        img_prod_2, prod_id_3, gabtec_stock_prod_3, img_prod_3, prod_id_4, gabtec_stock_prod_4, img_prod_4,
+        c.stock stock_publicacion FROM gabteccl_sitbdd1978.tbl_mercado_libre a
+        left join automarc_automarco.tbl_marcas_2 b on a.marca_id = b.marca_id
+        left join gabteccl_sitbdd1978.tbl_marcas_productos as d on a.marca_pub=d.marca_id
+        LEFT join gabteccl_mlibre.tbl_publicaciones c on a.cod_publicacion = c.cod_publicacion
+        left join gabteccl_sitbdd1978.tbl_mercado_libre_relac e on a.id_tipo_relacion = e.id_tipo_relacion
+        where a.id_empresa in (10,14)
+        LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    return { data: rows, total };
+  } catch (error) {
+    console.error("Error al obtener recetas:", error);
+    return { data: [], total: 0 };
+  }
+};
+
+// Portado desde producción: listado paginado de imágenes de productos
+// (Daito/Disam), opcionalmente filtrado por empresa.
+const getImagenesProductos = async (limit, offset, empresa) => {
+  try {
+    let total = 0;
+
+    if (empresa) {
+      const [countResult] = await connection.execute(
+        `SELECT COUNT(*) as total FROM automarc_automarco.tbl_imagenes_daitodisam WHERE empresa = ?;`,
+        [empresa]
+      );
+      total = countResult[0].total;
+    } else {
+      const [countResult] = await connection.execute(
+        `SELECT COUNT(*) as total FROM automarc_automarco.tbl_imagenes_daitodisam;`
+      );
+      total = countResult[0].total;
+    }
+
+    let rows;
+    if (empresa) {
+      [rows] = await connection.query(
+        `SELECT a.prod_id, a.empresa, a.img_1, a.img_2, a.img_3, a.img_4, a.img_5, a.img_6, a.img_7, a.img_8, a.img_9, a.img_10
+         FROM automarc_automarco.tbl_imagenes_daitodisam a
+         WHERE a.empresa = ?
+         LIMIT ? OFFSET ?`,
+        [empresa, limit, offset]
+      );
+    } else {
+      [rows] = await connection.query(
+        `SELECT a.prod_id, a.empresa, a.img_1, a.img_2, a.img_3, a.img_4, a.img_5, a.img_6, a.img_7, a.img_8, a.img_9, a.img_10
+         FROM automarc_automarco.tbl_imagenes_daitodisam a
+         LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+    }
+
+    return { data: rows, total };
+  } catch (error) {
+    console.error("Error al obtener imagenes de productos:", error);
+    return { data: [], total: 0 };
+  }
+};
 
 
 const obtenerDescuentoEmpresa = async (prod_id, empresa, rut_cliente) => {
@@ -122,6 +373,49 @@ const obtenerDescuentoEmpresa = async (prod_id, empresa, rut_cliente) => {
   }
 };
 
+// Descuento para el listado de productos: a diferencia de obtenerDescuentoEmpresa
+// (usada al crear pedidos), acá el descuento depende de la sucursal exacta que
+// entrega el cliente -> sin fallback a sucursal '0'. Si la sucursal no viene o no
+// existe para ese rut, se devuelve 0 (precio de lista).
+const obtenerDescuentoPorSucursal = async (empresa, rut_cliente, cli_sec, esFrenos = false) => {
+  if (!rut_cliente || !cli_sec) return 0;
+
+  try {
+    let tablaClientes = "";
+    let colDescCli = "cli_descuento";
+
+    switch (empresa.toUpperCase()) {
+      case "AUTOTEC":
+        tablaClientes = "autotec_ecom.tbl_clientes";
+        break;
+      case "GABTEC":
+        tablaClientes = "gabteccl_sitbdd1978.tbl_clientes";
+        colDescCli = esFrenos ? "cli_dcto2" : "cli_descuento";
+        break;
+      case "AUTOMARCO":
+        tablaClientes = "automarc_automarco.tbl_clientes";
+        break;
+      case "HD":
+        tablaClientes = "autohd_automarcohd.tbl_clientes";
+        break;
+      default: return 0;
+    }
+
+    const [rows] = await connection.execute(
+      `SELECT ${colDescCli} as descuento FROM ${tablaClientes} WHERE cli_rut = ? AND cli_sec = ? LIMIT 1;`,
+      [rut_cliente, cli_sec]
+    );
+
+    if (rows.length === 0) return 0;
+
+    return rows[0].descuento || 0;
+
+  } catch (error) {
+    console.error(`Error calculando descuento por sucursal (${empresa}):`, error.message);
+    return 0;
+  }
+};
+
 // procesa la lista de productos para asignar precios finales y determinar la empresa global
 const validarPedidoEmpresa = async (productos, cli_rut) => { 
   let automarco = 0, autotec = 0, gabtec = 0, frenos = 0, hd = 0;
@@ -134,16 +428,17 @@ const validarPedidoEmpresa = async (productos, cli_rut) => {
       
       if (!empresaData || empresaData.length === 0) {
          v.precio = 0;
+         v.descuento = 0;
          v.empresa = "DESCONOCIDA";
          return v;
       }
-      
+
       const empresaNombre = empresaData[0].empresa;
       const precioBase = Number(empresaData[0].prod_precio);
 
       //  calcular descuento
       const descuento = await obtenerDescuentoEmpresa(v.sku, empresaNombre, cli_rut);
-      
+
       //  aplica precio final
       if(descuento == 0){
         v.precio = precioBase;
@@ -152,8 +447,9 @@ const validarPedidoEmpresa = async (productos, cli_rut) => {
         let precioFinal = precioBase - (precioBase * factor);
         v.precio = Math.round(precioFinal);
       }
-      
-      v.empresa = empresaNombre;      
+
+      v.descuento = descuento;
+      v.empresa = empresaNombre;
       v.titulo = empresaData[0].nombre;
       return v;
     })
@@ -329,12 +625,12 @@ const insertPedidoEmpresa = async (db, grupo) => {
     //inserta detalle del pedido en base pedidos_api
     if (grupo.productos && grupo.productos.length > 0) {
         const sqlDetalle = `
-            INSERT INTO bd_api_automarco.tbl_pedidos_detalle (pedido_id, prod_id, cantidad, empresa, pedcorint)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO bd_api_automarco.tbl_pedidos_detalle (pedido_id, prod_id, cantidad, empresa, pedcorint, precio, descuento)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
         for (const prod of grupo.productos) {
             await db.execute(sqlDetalle, [
-                idPedidoGenerado, prod.codigo, prod.cantidad, prod.empresa, grupo.pedcorint
+                idPedidoGenerado, prod.codigo, prod.cantidad, prod.empresa, grupo.pedcorint, prod.precio, prod.descuento
             ]);
         }
     }
@@ -345,6 +641,7 @@ const insertPedidoEmpresa = async (db, grupo) => {
 export {
   getStockProducts,
   obtenerDescuentoEmpresa,
+  obtenerDescuentoPorSucursal,
   validarPedidoEmpresa,
   limpiarEmpresa,
   obtenerNombreTransporte,
@@ -354,4 +651,10 @@ export {
   obtenerCorrelativoPorEmpresa,
   getOCdefinitiva,
   insertPedidoEmpresa,
+  getProductById,
+  getOemById,
+  getInfoTR,
+  getVolumetriaWms,
+  getAllRecetas,
+  getImagenesProductos,
 };
