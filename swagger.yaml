@@ -189,6 +189,13 @@ components:
                 type: integer
                 description: ID autoincremental de la tabla pedidos_api
                 example: 21
+          example:
+            - empresa: "GABTEC"
+              pedido: "93-139965"
+              id_interno: 21
+            - empresa: "AUTOMARCO"
+              pedido: "1-27841"
+              id_interno: 22
         datos_cliente:
           type: object
           properties:
