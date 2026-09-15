@@ -668,50 +668,6 @@ paths:
         '500':
           description: Error interno
 
-  /ordenes-disam:
-    post:
-      summary: Crear orden desde Mercado Libre / Daito (Disam)
-      description: |
-        Este endpoint **ESCRIBE** datos reales en la API y DMZ.
-
-        A diferencia de `/pedidos`, estas órdenes no pertenecen a un cliente
-        real autenticado: representan ventas de Mercado Libre y se registran
-        contra una cuenta fija por empresa. Inserta en `bd_daito_disam` (no en
-        `bd_api_automarco`).
-      tags:
-        - Pedidos
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - productos
-                - cabecera
-              properties:
-                productos:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      codigo: { type: string, example: "72204-9" }
-                      cantidad: { type: integer, example: 2 }
-                cabecera:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      numero_orden: { type: string, example: "2000012345678" }
-                      etiqueta_zpl: { type: string, description: "Etiqueta de envío en formato ZPL." }
-      responses:
-        '200':
-          description: Orden creada.
-        '400':
-          description: Faltan productos o cabecera.
-        '500':
-          description: Error interno del servidor.
-
   /buscar-prod/{id}:
     get:
       summary: Ficha de un producto por SKU
@@ -771,27 +727,9 @@ paths:
         '401':
           description: No autorizado.
 
-  /recetas:
-    get:
-      summary: Listado paginado de recetas de compatibilidad (Mercado Libre)
-      tags:
-        - Productos
-      parameters:
-        - in: query
-          name: page
-          schema: { type: integer, default: 1 }
-        - in: query
-          name: limit
-          schema: { type: integer, default: 500 }
-      responses:
-        '200':
-          description: Listado paginado.
-        '401':
-          description: No autorizado.
-
   /imagenes-productos:
     get:
-      summary: Listado paginado de imágenes de productos (Daito/Disam)
+      summary: Listado paginado de imágenes de productos
       tags:
         - Productos
       parameters:
