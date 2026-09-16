@@ -2,6 +2,9 @@ import 'dotenv/config';
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import readline from "readline";
+import crypto from "crypto";
+import bcrypt from "bcryptjs";
+import { JWT_EXPIRES_IN } from "./src/api/v1/helpers/jwtConfig.js";
 
 // Hallazgo C6/C7: antes esta conexión (y la de config/bdPedidosApi.js) apuntaba a
 // 'localhost' con usuario root sin contraseña, hardcodeado. Ahora usa las mismas
@@ -104,21 +107,30 @@ async function generarToken() {
         };
 
         // genera token
-        const payload = { 
+        const payload = {
             rut: rutInput,
             nombre: nombreCliente,
             cli_id: cli_id
         };
 
-        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '365d' });
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-      
-        // insertar datos de permisos y token en la bd
+        // api-key fija del cliente, para que despues pueda renovar su propio
+        // token via POST /auth/renovar-token sin depender de este script.
+        // Es aleatoria (nunca derivada de rut/nombre, que no son secretos) y
+        // solo se muestra una vez por consola: en la base queda solo su hash.
+        const apiKeyPlano = crypto.randomBytes(32).toString('hex');
+        const apiKeyHash = await bcrypt.hash(apiKeyPlano, 10);
+
+        // insertar datos de permisos, token y api-key en la bd
         const sqlUpsert = `
-            INSERT INTO bd_api_automarco.tbl_permisos_clientes (rut, api_token, automarco, gabtec, autotec, hd)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO bd_api_automarco.tbl_permisos_clientes (rut, nombre, cli_id, api_token, api_key_hash, automarco, gabtec, autotec, hd)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON DUPLICATE KEY UPDATE
+                nombre = VALUES(nombre),
+                cli_id = VALUES(cli_id),
                 api_token = VALUES(api_token),
+                api_key_hash = VALUES(api_key_hash),
                 automarco = VALUES(automarco),
                 gabtec = VALUES(gabtec),
                 autotec = VALUES(autotec),
@@ -127,10 +139,13 @@ async function generarToken() {
 
         await connection.execute(sqlUpsert, [
             rutInput,
-            token, 
-            dbPermisos.automarco, 
-            dbPermisos.gabtec, 
-            dbPermisos.autotec, 
+            nombreCliente,
+            cli_id,
+            token,
+            apiKeyHash,
+            dbPermisos.automarco,
+            dbPermisos.gabtec,
+            dbPermisos.autotec,
             dbPermisos.hd
         ]);
 
@@ -140,6 +155,10 @@ async function generarToken() {
         console.log(`Permisos: Automarco[${dbPermisos.automarco}] Gabtec[${dbPermisos.gabtec}] Autotec[${dbPermisos.autotec}] HD[${dbPermisos.hd}]`);
         console.log("\nToken Generado:");
         console.log(token);
+        console.log("\nApi-Key Generada (guardala ahora, no se vuelve a mostrar):");
+        console.log(apiKeyPlano);
+        console.log("\nEntregar al cliente el TOKEN y la API-KEY por un canal seguro.");
+        console.log("Con la API-KEY el cliente podra renovar su propio token en POST /auth/renovar-token cuando este por vencer.");
 
 
     } catch (error) {

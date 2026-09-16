@@ -2,7 +2,13 @@ openapi: 3.0.0
 info:
   title: API Gestion de productos automarco e inyeccion de pedidos (v2)
   version: 2.0.0
-  description: Documentación unificada de la API — versión v2 en pruebas previas a reemplazar v1.
+  description: |
+    Documentación unificada de la API — versión v2 en pruebas previas a reemplazar v1.
+
+    **Rate limiting:** por cliente (rut del token), 100 solicitudes/minuto para
+    endpoints de lectura y 20 solicitudes/minuto para los de escritura
+    (`/pedidos`, `/ordenes-disam`). Al exceder el límite responde `429 Too Many
+    Requests` con headers estándar (`RateLimit-*`, `Retry-After`).
 
 servers:
   - url: https://apiproductos.automarco.cl:3008/api/v2
@@ -168,13 +174,26 @@ components:
     PedidoResponse:
       type: object
       properties:
+        alertas:
+          type: array
+          description: >
+            Empresas del pedido que quedaron excluidas — por falta de permiso del
+            cliente, por no indicar sucursal para esa empresa, o por indicar una
+            sucursal que no existe para el cliente (vacío si se procesó todo).
+          items:
+            type: object
+            properties:
+              empresa: { type: string, example: "GABTEC" }
+              motivo: { type: string, example: "El cliente no tiene permiso para comprar en GABTEC." }
         pedidos:
           type: array
           description: >
             Un elemento por cada empresa involucrada en el pedido (un pedido
             multiempresa genera un correlativo y una cabecera independiente
             por empresa; GABTEC y FRENOS mezclados se fusionan en un solo
-            pedido "UNIFICADO").
+            pedido "UNIFICADO"). Cada empresa despacha desde la sucursal que el
+            cliente eligió para ella — las direcciones ya no tienen que coincidir
+            entre empresas.
           items:
             type: object
             properties:
@@ -189,13 +208,23 @@ components:
                 type: integer
                 description: ID autoincremental de la tabla pedidos_api
                 example: 21
+              direccion_despacho:
+                type: string
+                example: "SUCRE 2003"
+              comuna:
+                type: string
+                example: "NUNOA"
           example:
             - empresa: "GABTEC"
               pedido: "93-139965"
               id_interno: 21
+              direccion_despacho: "SUCRE 2003"
+              comuna: "NUNOA"
             - empresa: "AUTOMARCO"
               pedido: "1-27841"
               id_interno: 22
+              direccion_despacho: "AV. PROVIDENCIA 1234"
+              comuna: "PROVIDENCIA"
         datos_cliente:
           type: object
           properties:
@@ -204,7 +233,11 @@ components:
               example: "76813177-5"
             condicion_pago:
               type: object
-              description: Objeto con las condiciones de pago por empresa
+              description: >
+                Condición de pago por empresa, leída directamente de la sucursal
+                del cliente en la base de datos (con caída a la sucursal '0' si
+                la sucursal específica no tiene una registrada). null si esa
+                empresa no quedó con sucursal válida.
               properties:
                 automarco:
                   type: string
@@ -222,15 +255,9 @@ components:
                   type: string
                   nullable: true
                   example: null
-            direccion_despacho:
-              type: string
-              example: "SUCRE 2003"
-            comuna:
-              type: string
-              example: "NUNOA"
         detalle_productos:
           type: array
-          description: Lista de productos del pedido.
+          description: Lista de productos efectivamente procesados en el pedido.
           items:
             type: object
             properties:
@@ -242,6 +269,10 @@ components:
                 type: integer
               precio_unitario:
                 type: integer
+                description: Precio de lista (sin descuento aplicado).
+              descuento:
+                type: integer
+                description: Porcentaje de descuento del cliente para este producto (0 si no aplica).
               empresa:
                 type: string
           example:
@@ -249,11 +280,13 @@ components:
               descripcion: "Amortiguador Daher Boge"
               cantidad: 10
               precio_unitario: 10208
+              descuento: 0
               empresa: "GABTEC"
             - sku: "10328-4"
               descripcion: "Alternador "
               cantidad: 10
               precio_unitario: 85090
+              descuento: 10
               empresa: "AUTOMARCO"
     Transporte:
       type: object
@@ -338,6 +371,56 @@ security:
   - bearerAuth: []
 
 paths:
+  /auth/renovar-token:
+    post:
+      summary: Renovar el propio token (JWT)
+      description: |
+        Emite un JWT nuevo para el cliente, sin depender de que el equipo lo
+        regenere manualmente. Requiere la **api-key fija** entregada al crear
+        el acceso (junto con el primer token, ver `generartokendb.js`) — no el
+        token JWT, que puede estar vencido.
+
+        No requiere `Authorization` — es el punto de entrada cuando el JWT ya
+        no sirve. Limitado a 5 intentos/minuto por rut (protección contra
+        fuerza bruta sobre la api-key).
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - rut
+                - api_key
+              properties:
+                rut:
+                  type: string
+                  example: "18211738-2"
+                api_key:
+                  type: string
+                  description: Api-key fija del cliente (no es el JWT).
+                  example: "a1b2c3...64 caracteres hex"
+      responses:
+        '200':
+          description: Token renovado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, example: "eyJhbGciOi..." }
+                  expira_en: { type: string, example: "90d" }
+        '400':
+          description: Falta `rut` o `api_key`.
+        '401':
+          description: Rut o api-key inválidos (mensaje genérico, no distingue cuál de los dos falló).
+        '429':
+          description: Demasiados intentos para ese rut en el último minuto.
+        '500':
+          description: Error interno del servidor.
+
   /category:
     get:
       summary: Obtener todas las categorias
@@ -602,8 +685,20 @@ paths:
           tabla DMZ) independiente por cada una. GABTEC y FRENOS mezclados en el mismo
           pedido se fusionan en un solo pedido "UNIFICADO", ya que comparten la misma
           tabla DMZ.
-        - **Validación Logística:** Verifica que todas las sucursales indicadas en el pedido tengan la misma dirección.
-        - **Validación Estricta:** Si una sucursal no existe, rechaza el pedido.
+        - **Transporte obligatorio:** hay que enviar `tran_id` o `tran_nombre`; si
+          faltan ambos, se rechaza con `400`.
+        - **Sucursal obligatoria por empresa:** cada empresa presente en `productos`
+          necesita su sucursal en `sucursales`. Cada empresa despacha desde la
+          sucursal que el cliente eligió para ella — ya no se exige que las
+          direcciones coincidan entre empresas.
+        - **Permisos y sucursales parciales:** si el cliente no tiene permiso en una
+          empresa, o no se indicó sucursal para ella, o la sucursal indicada no
+          existe para el cliente, esa empresa se excluye del pedido (no corta el
+          resto) y queda listada en `alertas`. Si **ninguna** empresa del pedido
+          termina con permiso y sucursal válida, no se crea nada: responde `403`
+          si el motivo es falta de permiso en todas, o `400` si alguna tenía
+          permiso pero ninguna tenía sucursal válida — en ambos casos con
+          `alertas` detallando el motivo por empresa.
 
         *Nota: El RUT del cliente se obtiene automáticamente del Token de autenticación.*
       tags:
@@ -616,20 +711,29 @@ paths:
               type: object
               required:
                 - productos
-                - tran_id
+                - sucursales
               properties:
                 tran_id:
                   type: string
+                  description: Requerido si no se envía `tran_nombre`.
                   example: "2"
                 tran_nombre:
                   type: string
+                  description: Requerido si no se envía `tran_id`.
                   example: "RETIRA CLIENTE"
                 sucursales:
                   type: object
-                  description: Códigos de sucursal (sec) por empresa.
+                  description: >
+                    Código de sucursal (cli_sec) por empresa. Obligatorio incluir
+                    la de cada empresa presente en `productos` (GABTEC cubre
+                    también los productos FRENOS); si falta o no existe para el
+                    cliente, esa empresa queda excluida del pedido (ver `alertas`
+                    en la respuesta).
                   properties:
                     AUTOMARCO: { type: string, example: "0" }
+                    AUTOTEC: { type: string, example: "0" }
                     GABTEC: { type: string, example: "0" }
+                    HD: { type: string, example: "0" }
 
                 productos:
                   type: array
@@ -656,22 +760,51 @@ paths:
 
       responses:
         '201':
-          description: Pedido Creado Exitosamente
+          description: >
+            Pedido creado. Si alguna empresa del pedido quedó fuera (por permiso,
+            sucursal faltante o sucursal inválida), igual responde 201 con lo que
+            sí se pudo procesar y `alertas` no vacío detallando qué se excluyó y
+            por qué.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PedidoResponse'
         '400':
-          description: Error de Validación (Logística o Sucursal)
+          description: >
+            Error de validación de entrada (falta `productos`, falta transporte,
+            SKU no encontrado), o ninguna empresa quedó con sucursal válida (en
+            este último caso responde con `alertas`, igual que el 403).
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  message: { type: string, example: "No se pudo procesar el pedido" }
-                  error_detail: { type: string, example: "Error: La sucursal código 1 para gabtec no existe o no esta creada" }
+                  message: { type: string, example: "No se pudo procesar el pedido: ninguna empresa tiene una sucursal válida." }
+                  error_detail: { type: string, example: "SKU no encontrado: 99999-9" }
+                  alertas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        empresa: { type: string, example: "GABTEC" }
+                        motivo: { type: string, example: "La sucursal código '5' para GABTEC no existe o no esta creada." }
         '401':
           description: No autorizado
+        '403':
+          description: El cliente no tiene permiso en ninguna de las empresas del pedido (no se creó nada).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "No se pudo procesar el pedido: el cliente no tiene permiso en ninguna de las empresas solicitadas." }
+                  alertas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        empresa: { type: string, example: "GABTEC" }
+                        motivo: { type: string, example: "El cliente no tiene permiso para comprar en GABTEC." }
         '500':
           description: Error interno
 

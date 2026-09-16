@@ -1,4 +1,5 @@
 import connection from "../../../../config/bdPedidosApi.js";
+import { ValidationError } from "../helpers/errors.js";
 
 
 
@@ -439,21 +440,22 @@ const validarPedidoEmpresa = async (productos, cli_rut) => {
       //  calcular descuento
       const descuento = await obtenerDescuentoEmpresa(v.sku, empresaNombre, cli_rut);
 
-      //  aplica precio final
-      if(descuento == 0){
-        v.precio = precioBase;
-      } else {
-        let factor = (descuento / 100);
-        let precioFinal = precioBase - (precioBase * factor);
-        v.precio = Math.round(precioFinal);
-      }
-
+      // se guarda el precio de lista (sin descuento aplicado); el % de descuento
+      // queda registrado aparte en v.descuento.
+      v.precio = precioBase;
       v.descuento = descuento;
       v.empresa = empresaNombre;
       v.titulo = empresaData[0].nombre;
       return v;
     })
   );
+
+  // corta el pedido si vino algun SKU que no existe en ninguna empresa, en vez de
+  // dejar que caiga (por accidente) en el chequeo de permisos mas adelante
+  const skusNoEncontrados = array_prod_emp.filter((p) => p.empresa === "DESCONOCIDA").map((p) => p.sku);
+  if (skusNoEncontrados.length > 0) {
+    throw new ValidationError(`SKU no encontrado: ${skusNoEncontrados.join(', ')}`);
+  }
 
   // contabiliza cuántos productos hay de cada empresa
   array_prod_emp.forEach((p) => {
@@ -598,13 +600,19 @@ const insertPedidoEmpresa = async (db, grupo) => {
     const config = MAPA_DMZ_EMPRESA[grupo.empresa];
     if (!config) throw new Error(`Empresa no reconocida al insertar pedido: ${grupo.empresa}`);
 
+    // PEDCLIRUT es "int unsigned" en la DMZ (guarda el rut sin guion ni dígito
+    // verificador, ej. 76230475) -> a diferencia de bd_api_automarco.cli_rut
+    // (varchar, guarda el rut completo "18211738-2"), acá hay que pasarle solo
+    // la parte numérica.
+    const rutNumerico = parseInt(String(grupo.rut).split('-')[0], 10);
+
     // inserta la reserva del correlativo en la DMZ de esta empresa.
     // OJO: no se fija PEDESTPRO -> queda en su default (2). El cron que integra
     // estos pedidos en el DMZ ignora las filas con PEDESTPRO=2 y recien las toma
     // cuando otro proceso las pasa a 0; fijarlo aca las procesaria antes de tiempo.
     await db.execute(
         `INSERT INTO ${config.tabla} (PEDVENRUT, PEDVENSEC, PEDCORINT, PEDFCH, PEDEST, PEDCLIRUT, PEDCLISEC) VALUES (?, 0, ?, NOW(), 0, ?, ?)`,
-        [config.pedvenrut, grupo.pedcorint, grupo.rut, grupo.cli_sec]
+        [config.pedvenrut, grupo.pedcorint, rutNumerico, grupo.cli_sec]
     );
 
     //inserta cabecera del pedido en base pedidos_api

@@ -14,6 +14,7 @@ import getAllProductsAplications1 from "../../src/api/v1/controllers/productscon
 import { insertarPedidosDisamController } from "../../src/api/v1/controllers/PedidosDisamController.js";
 
 import { existCla } from "../../src/api/v1/middlewares/valida_clasificacion.js";
+import { escrituraLimiter } from "../../src/api/v1/middlewares/rateLimiter.js";
 
 
 
@@ -23,9 +24,9 @@ const router = express.Router();
 router.post("/products",existCla ,getAllProductsAplications1);
 
 
-router.post("/pedidos", insertarPedidosRepSolController);
+router.post("/pedidos", escrituraLimiter, insertarPedidosRepSolController);
 
-router.post("/ordenes-disam", insertarPedidosDisamController);
+router.post("/ordenes-disam", escrituraLimiter, insertarPedidosDisamController);
 
 
 router.get("/stock/:empresa/:codigo/:cantidad",  getStockProductsController);

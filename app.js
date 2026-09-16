@@ -8,12 +8,14 @@ import categoryRouter from './config/routes/categoriesRoutes.js';
 import brandsRouters from './config/routes/brandsRoutes.js';
 import cilidRouters from './config/routes/cilindRoutes.js';
 import transportRoutes from './config/routes/transportsroutes.js';
-import verificarToken from "./src/api/v1/middlewares/autentificacion.js"; 
+import verificarToken from "./src/api/v1/middlewares/autentificacion.js";
 import validarIP from "./src/api/v1/middlewares/valida_ip.js";
+import { lecturaLimiter } from "./src/api/v1/middlewares/rateLimiter.js";
 import swaggerUi from "swagger-ui-express";
 import YAML from "yamljs";
 import path from 'path';
 import clientRoutes from './config/routes/sucursalesRoutes.js';
+import authRoutes from './config/routes/authRoutes.js';
 const app = express();
 
 
@@ -32,11 +34,14 @@ app.get("/", (req,res)=>{
 });
 
 
-app.use("/api/v2", verificarToken, validarIP, productsRouter);
-app.use("/api/v2", verificarToken, validarIP, categoryRouter);
-app.use("/api/v2", verificarToken, validarIP, brandsRouters);
-app.use("/api/v2", verificarToken, validarIP, modelsRouter);
-app.use("/api/v2", verificarToken, validarIP, cilidRouters);
-app.use("/api/v2", verificarToken, validarIP, transportRoutes);
-app.use("/api/v2", verificarToken, validarIP, clientRoutes);
+// Sin verificarToken: es el endpoint para renovar el JWT cuando ya venció.
+app.use("/api/v2", authRoutes);
+
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, productsRouter);
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, categoryRouter);
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, brandsRouters);
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, modelsRouter);
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, cilidRouters);
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, transportRoutes);
+app.use("/api/v2", verificarToken, validarIP, lecturaLimiter, clientRoutes);
 export default app;

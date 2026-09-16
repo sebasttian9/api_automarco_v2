@@ -18,6 +18,7 @@ import {
 import prepareHateoas from "../helpers/hateoas.js";
 import connection from "../../../../config/bdPedidosApi.js";
 import obtenerPermisos from "../helpers/verificapermiso.js";
+import { ValidationError } from "../helpers/errors.js";
 
 const getStockProductsController = async (req, res) => {
   try {
@@ -55,7 +56,7 @@ const getOCdefinitivaController = async (req, res) => {
 
 
 const insertarPedidosRepSolController = async (req, res) => {
-    
+
     const db = await connection.getConnection();
     await db.beginTransaction();
 
@@ -75,7 +76,12 @@ const insertarPedidosRepSolController = async (req, res) => {
             return res.status(400).json({ message: "El pedido debe incluir al menos un producto." });
         }
 
-        // sacar precios de los productos
+        if (!body.tran_nombre && !body.tran_id) {
+            await db.rollback(); db.release();
+            return res.status(400).json({ message: "El transporte es obligatorio (tran_nombre o tran_id)." });
+        }
+
+        // sacar precios de los productos (precio de lista) y su empresa
         await validarPedidoEmpresa(body.productos, rut);
 
         // Hallazgo C2: antes no se validaba si el cliente tenia permiso para comprar
@@ -107,11 +113,19 @@ const insertarPedidosRepSolController = async (req, res) => {
             return !campoPermiso || permisos[campoPermiso] !== 1;
         });
 
-        if (empresasSinPermiso.length > 0) {
+        // En vez de rechazar el pedido completo por una empresa sin permiso, se
+        // procesan las que sí tienen permiso y las demás quedan como alerta.
+        const productosConPermiso = body.productos.filter((p) => !empresasSinPermiso.includes(p.empresa));
+        const alertas = empresasSinPermiso.map((emp) => ({
+            empresa: emp,
+            motivo: `El cliente no tiene permiso para comprar en ${emp}.`
+        }));
+
+        if (productosConPermiso.length === 0) {
             await db.rollback(); db.release();
             return res.status(403).json({
-                message: "No se pudo procesar el pedido",
-                error_detail: `El cliente no tiene permiso para comprar en: ${empresasSinPermiso.join(', ')}`
+                message: "No se pudo procesar el pedido: el cliente no tiene permiso en ninguna de las empresas solicitadas.",
+                alertas
             });
         }
 
@@ -121,67 +135,76 @@ const insertarPedidosRepSolController = async (req, res) => {
         let tran_nombre = validaCampo(body.tran_nombre);
         if (!tran_nombre && body.tran_id) tran_nombre = await obtenerNombreTransporte(body.tran_id);
 
-        // Sucursales
+        // Sucursales: es obligatoria por cada empresa presente en el pedido (ya no
+        // se acepta "retiro sin sucursal"). Cada empresa se resuelve por separado:
+        // si falta o el código no existe para este cliente, esa empresa queda
+        // excluida (alerta), sin afectar a las demás que sí tengan una sucursal
+        // válida. Ya no se exige que las direcciones coincidan entre empresas:
+        // cada una despacha desde la sucursal que el cliente eligió para ella.
         const sucursales = body.sucursales || {};
-        const secAutomarco = validaCampo(sucursales.AUTOMARCO);
-        const secAutotec   = validaCampo(sucursales.AUTOTEC);
-        const secHD        = validaCampo(sucursales.HD);
-        const secGabtec    = validaCampo(sucursales.GABTEC); 
-
-        // comparar direccion de las sucursales entregadas
-        const direccionesDetectadas = [];
-        let direccionFinal = "RETIRO / SIN INFORMACIÓN";
-        let comunaFinal = "";
-        
-        const chequearDireccion = async (emp, sec) => {
-            if (sec) {
-                const d = await obtenerDireccionSucursal(rut, emp, sec);
-                
-                // --- VALIDACIÓN DE SEGURIDAD ---
-                // Si la BD retorna null, la sucursal no existe o no es del cliente.
-                if (!d) {
-                    throw new Error(`Error: La sucursal código '${sec}' para ${emp} no existe o no esta creada.`);
-                }
-
-                if (d.direccion) {
-                    direccionesDetectadas.push(d.direccion.trim().toUpperCase());
-                    if (direccionFinal === "RETIRO / SIN INFORMACIÓN") {
-                        direccionFinal = d.direccion.trim();
-                        comunaFinal = d.comuna ? d.comuna.trim() : "";
-                    }
-                }
-            }
+        const secPorEmpresa = {
+            AUTOMARCO: validaCampo(sucursales.AUTOMARCO),
+            AUTOTEC: validaCampo(sucursales.AUTOTEC),
+            HD: validaCampo(sucursales.HD),
+            GABTEC: validaCampo(sucursales.GABTEC),
+            FRENOS: validaCampo(sucursales.GABTEC), // FRENOS comparte sucursal con GABTEC
         };
-        
-        // Ejecutamos validaciones (si alguna falla, salta al catch y hace rollback)
-        await chequearDireccion("AUTOMARCO", secAutomarco);
-        await chequearDireccion("AUTOTEC", secAutotec);
-        await chequearDireccion("HD", secHD);
-        await chequearDireccion("GABTEC", secGabtec);
 
-        if ([...new Set(direccionesDetectadas)].length > 1) {
-             throw new Error(`Error Logístico: Las direcciones de las sucursales no coinciden entre sí.`);
+        const empresasConPermiso = [...new Set(productosConPermiso.map((p) => p.empresa))];
+        const resolucionPorEmpresa = {};
+
+        for (const emp of empresasConPermiso) {
+            const sec = secPorEmpresa[emp];
+
+            if (!sec) {
+                alertas.push({ empresa: emp, motivo: `No se indicó sucursal para la empresa ${emp}.` });
+                continue;
+            }
+
+            const d = await obtenerDireccionSucursal(rut, emp, sec);
+            if (!d) {
+                alertas.push({ empresa: emp, motivo: `La sucursal código '${sec}' para ${emp} no existe o no esta creada.` });
+                continue;
+            }
+
+            const cli_conven = await obtenerCondpagoPorSucursal(db, rut, sec, emp);
+
+            resolucionPorEmpresa[emp] = {
+                cli_sec: sec,
+                cli_conven,
+                direccion: d.direccion ? d.direccion.trim() : null,
+                comuna: d.comuna ? d.comuna.trim() : null,
+            };
         }
 
-        // sacar las condiciones de pago por sucursal
-        const convenAutomarco = secAutomarco ? await obtenerCondpagoPorSucursal(db, rut, secAutomarco, "AUTOMARCO") : null;
-        const convenAutotec   = secAutotec   ? await obtenerCondpagoPorSucursal(db, rut, secAutotec, "AUTOTEC") : null;
-        const convenHD        = secHD        ? await obtenerCondpagoPorSucursal(db, rut, secHD, "HD") : null;
-        const convenGabtec    = secGabtec    ? await obtenerCondpagoPorSucursal(db, rut, secGabtec, "GABTEC") : null;
+        const productosFinales = productosConPermiso.filter((p) => resolucionPorEmpresa[p.empresa]);
 
-        // sucursal/convenio a usar segun la empresa del grupo (FRENOS comparte cliente con GABTEC)
-        const SUCURSAL_POR_EMPRESA = {
-            AUTOMARCO: { cli_sec: secAutomarco, cli_conven: convenAutomarco },
-            AUTOTEC:   { cli_sec: secAutotec, cli_conven: convenAutotec },
-            HD:        { cli_sec: secHD, cli_conven: convenHD },
-            GABTEC:    { cli_sec: secGabtec, cli_conven: convenGabtec },
-            FRENOS:    { cli_sec: secGabtec, cli_conven: convenGabtec },
-            UNIFICADO: { cli_sec: secGabtec, cli_conven: convenGabtec },
+        if (productosFinales.length === 0) {
+            await db.rollback(); db.release();
+            return res.status(400).json({
+                message: "No se pudo procesar el pedido: ninguna empresa tiene una sucursal válida.",
+                alertas
+            });
+        }
+
+        // sucursal/convenio/direccion a usar segun la empresa del grupo
+        const SUCURSAL_POR_EMPRESA = { ...resolucionPorEmpresa };
+        if (SUCURSAL_POR_EMPRESA.GABTEC || SUCURSAL_POR_EMPRESA.FRENOS) {
+            SUCURSAL_POR_EMPRESA.UNIFICADO = SUCURSAL_POR_EMPRESA.GABTEC || SUCURSAL_POR_EMPRESA.FRENOS;
+        }
+
+        // condición de pago por empresa, para el resumen del cliente (null si esa
+        // empresa no quedó con sucursal válida / no viene en el pedido)
+        const condicion_pago = {
+            automarco: resolucionPorEmpresa.AUTOMARCO?.cli_conven ?? null,
+            gabtec: (resolucionPorEmpresa.GABTEC?.cli_conven ?? resolucionPorEmpresa.FRENOS?.cli_conven) ?? null,
+            autotec: resolucionPorEmpresa.AUTOTEC?.cli_conven ?? null,
+            hd: resolucionPorEmpresa.HD?.cli_conven ?? null,
         };
 
-        // agrupar los productos por su empresa real (ya asignada por validarPedidoEmpresa)
+        // agrupar los productos finales por su empresa real (ya asignada por validarPedidoEmpresa)
         const gruposPorEmpresa = {};
-        for (const p of body.productos) {
+        for (const p of productosFinales) {
             if (!gruposPorEmpresa[p.empresa]) gruposPorEmpresa[p.empresa] = [];
             gruposPorEmpresa[p.empresa].push(p);
         }
@@ -209,33 +232,36 @@ const insertarPedidosRepSolController = async (req, res) => {
                 productos: productosParaModelo(productosGrupo),
             });
 
-            pedidos.push(pedido);
+            pedidos.push({
+                ...pedido,
+                direccion_despacho: sucursal.direccion || null,
+                comuna: sucursal.comuna || null,
+            });
         }
 
         await db.commit();
 
         res.status(201).json({
-            message: "Pedido creado exitosamente",
+            message: alertas.length > 0 ? "Pedido creado parcialmente: algunas empresas quedaron fuera (ver alertas)" : "Pedido creado exitosamente",
             pedidos,
+            alertas,
             datos_cliente: {
                 rut: rut,
-                condicion_pago: { automarco: convenAutomarco, gabtec: convenGabtec, autotec: convenAutotec, hd: convenHD },
-                direccion_despacho: direccionFinal,
-                comuna: comunaFinal
+                condicion_pago
             },
-            detalle_productos: body.productos.map(p => ({
-                sku: p.sku, descripcion: p.titulo || "Producto", cantidad: p.cantidad, precio_unitario: p.precio, empresa: p.empresa
+            detalle_productos: productosFinales.map(p => ({
+                sku: p.sku, descripcion: p.titulo || "Producto", cantidad: p.cantidad, precio_unitario: p.precio, descuento: p.descuento, empresa: p.empresa
             })),
         });
 
     } catch (error) {
-        await db.rollback(); 
+        await db.rollback();
         console.error("Error creando pedido:", error.message);
-        
-        
-        res.status(500).json({ 
-            message: "No se pudo procesar el pedido", 
-            error_detail: error.message 
+
+        const status = error instanceof ValidationError ? 400 : 500;
+        res.status(status).json({
+            message: "No se pudo procesar el pedido",
+            error_detail: error.message
         });
     } finally {
         db.release();
