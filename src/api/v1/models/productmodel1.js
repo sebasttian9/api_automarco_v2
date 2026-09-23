@@ -234,7 +234,8 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
                       f.agno_fin,
                       'AUTOTEC' as empresa,
                       a.unidades_caja,
-                      k.marca_nombre as marca_producto
+                      k.marca_nombre as marca_producto,
+                      COALESCE(m.multiplo, 1) as multiplo
               FROM autotec_ecom.tbl_productos AS a
               LEFT JOIN autotec_ecom.tbl_clasificacion AS d ON a.cla_id=d.cla_id
               LEFT JOIN autotec_ecom.tbl_especificacion j on a.espe_id = j.espe_id
@@ -246,6 +247,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
               LEFT JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id
               LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
               LEFT JOIN autotec_ecom.tbl_productos_agnos i on f.pm_id = i.pm_id
+              LEFT JOIN autotec_ecom.tbl_productos_multiplos m on m.id_prod = a.prod_id
               WHERE ${condiciones.join(" and ")}
               GROUP BY a.prod_id`,
         params
@@ -284,7 +286,8 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
                     f.agno_fin,
                     'GABTEC' as empresa,
                     k.marca_nombre as marca_producto,
-                    f.version
+                    f.version,
+                    COALESCE(m.multiplo, 1) as multiplo
             FROM gabteccl_sitbdd1978.tbl_productos AS a
             LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id
@@ -296,6 +299,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
             left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_multiplos m on m.id_prod = a.prod_id
             WHERE ${condiciones.join(" and ")}`,
         params
       );
@@ -331,7 +335,8 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
                   f.agno_inicio,
                   f.agno_fin,
                   'AUTOMARCO' as empresa,
-                  k.marca_nombre as marca_producto
+                  k.marca_nombre as marca_producto,
+                  COALESCE(m.multiplo, 1) as multiplo
           FROM automarc_automarco.tbl_productos2 AS a
           INNER JOIN automarc_automarco.tbl_clasificacion2 AS d ON a.cla_id2=d.cla_id2
           LEFT JOIN automarc_automarco.tbl_especificacion j on a.espe_id = j.espe_id
@@ -345,6 +350,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
           LEFT JOIN automarc_automarco.tbl_subfamilia y on y.sf_id = a.sf_id
           LEFT JOIN automarc_automarco.tbl_combustible z on z.id_combustible = f.id_combustible
           LEFT JOIN automarc_automarco.tbl_productos_agnos i on f.pm_id = i.pm_id
+          LEFT JOIN automarc_automarco.tbl_productos_multiplos m on m.id_prod = a.prod_id
           WHERE ${condiciones.join(" and ")}
           GROUP by a.prod_id`,
         params
@@ -367,7 +373,7 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
 
     if (empresa == "AUTOTEC") {
       const [producstAutotec, fields] = await connection.execute(
-        `SELECT DISTINCT 
+        `SELECT DISTINCT
                       a.prod_id,
                       a.id_prov,
                       a.prod_nombre,
@@ -384,19 +390,21 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
                       f.agno_inicio,
                       f.agno_fin,
                       'AUTOTEC' as empresa,
-                      k.marca_nombre as marca_producto
-              FROM autotec_ecom.tbl_productos AS a 
-              LEFT JOIN autotec_ecom.tbl_clasificacion AS d ON a.cla_id=d.cla_id 
-              LEFT JOIN autotec_ecom.tbl_especificacion j on a.espe_id = j.espe_id 
-              LEFT JOIN automarc_automarco.tbl_marcas_2 e on a.marca_id = e.marca_id 
-              LEFT join autotec_ecom.tbl_productos_modelos_2 f on a.prod_id = f.prod_id 
-              LEFT join autotec_ecom.tbl_marcas_productos k on a.marca_id = k.marca_id 
-              LEFT JOIN automarc_automarco.tbl_marcas_2 h on f.marca_id = h.marca_id 
-              LEFT join autotec_ecom.tbl_combustible as l on f.id_combustible = l.id_combustible 
-              LEFT JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id 
-              LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id 
-              LEFT JOIN autotec_ecom.tbl_productos_agnos i on f.pm_id = i.pm_id 
-              WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id = ? 
+                      k.marca_nombre as marca_producto,
+                      COALESCE(m.multiplo, 1) as multiplo
+              FROM autotec_ecom.tbl_productos AS a
+              LEFT JOIN autotec_ecom.tbl_clasificacion AS d ON a.cla_id=d.cla_id
+              LEFT JOIN autotec_ecom.tbl_especificacion j on a.espe_id = j.espe_id
+              LEFT JOIN automarc_automarco.tbl_marcas_2 e on a.marca_id = e.marca_id
+              LEFT join autotec_ecom.tbl_productos_modelos_2 f on a.prod_id = f.prod_id
+              LEFT join autotec_ecom.tbl_marcas_productos k on a.marca_id = k.marca_id
+              LEFT JOIN automarc_automarco.tbl_marcas_2 h on f.marca_id = h.marca_id
+              LEFT join autotec_ecom.tbl_combustible as l on f.id_combustible = l.id_combustible
+              LEFT JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id
+              LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
+              LEFT JOIN autotec_ecom.tbl_productos_agnos i on f.pm_id = i.pm_id
+              LEFT JOIN autotec_ecom.tbl_productos_multiplos m on m.id_prod = a.prod_id
+              WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id = ?
               GROUP BY a.prod_id`,
         [cla_id]
       );
@@ -406,9 +414,9 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
 
     if (empresa == "GABTEC") {
       const [producsGabtec, fields] = await connection.execute(
-        `SELECT DISTINCT 
+        `SELECT DISTINCT
                     a.prod_id,
-                    a.id_prov,                    
+                    a.id_prov,
                     a.prod_nombre,
                     a.prod_texto_corto,
                     a.prod_precio,
@@ -425,7 +433,8 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
                     f.agno_fin,
                     'GABTEC' as empresa,
                     k.marca_nombre as marca_producto,
-                    f.version
+                    f.version,
+                    COALESCE(m.multiplo, 1) as multiplo
             FROM gabteccl_sitbdd1978.tbl_productos AS a
             LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id
@@ -437,6 +446,7 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
             left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_multiplos m on m.id_prod = a.prod_id
             WHERE a.prod_estado = 1 and a.prod_id not in ('92989-1','92676-0','92648-5','93038-5','92499-7','93036-9','92634-5','93039-3','93061-K',
             '93062-8','93063-6') and d.cla_id = ? `,
         [cla_id]
@@ -447,7 +457,7 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
 
     if (empresa == "AUTOMARCO") {
       const [producstAutomarco, fields] = await connection.execute(
-        `SELECT 
+        `SELECT
                   a.prod_id,
                   a.id_prov_2 as id_prov,
                   a.prod_nombre_2 as prod_nombre,
@@ -460,27 +470,29 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
                   g.mod_id,
                   x.cilindrada,
                   t.valvulas,
-                  z.combustible,              
-                  k.marca_nombre as nombre_marc,                  
+                  z.combustible,
+                  k.marca_nombre as nombre_marc,
                   a.detalle,
                   f.agno_inicio,
                   f.agno_fin,
                   'AUTOMARCO' as empresa,
-                    k.marca_nombre as marca_producto
-          FROM automarc_automarco.tbl_productos2 AS a 
-          INNER JOIN automarc_automarco.tbl_clasificacion2 AS d ON a.cla_id2=d.cla_id2 
-          LEFT JOIN automarc_automarco.tbl_especificacion j on a.espe_id = j.espe_id 
-          INNER JOIN automarc_automarco.tbl_productos_modelos_2 f on a.prod_id = f.prod_id 
-          INNER JOIN automarc_automarco.tbl_marcas_productos k on a.marca_id = k.marca_id 
-          LEFT JOIN automarc_automarco.tbl_prod_img2 b on a.prod_id = b.prod_id 
-          INNER JOIN automarc_automarco.tbl_marcas_2 e on f.marca_id = e.marca_id 
-          LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.id_mod = g.id_mod 
-          INNER JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id 
-          INNER JOIN automarc_automarco.tbl_valvulas as t on f.valvulas_id = t.valvula_id 
-          LEFT JOIN automarc_automarco.tbl_subfamilia y on y.sf_id = a.sf_id 
-          LEFT JOIN automarc_automarco.tbl_combustible z on z.id_combustible = f.id_combustible 
-          LEFT JOIN automarc_automarco.tbl_productos_agnos i on f.pm_id = i.pm_id 
-          WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id2 = ? 
+                    k.marca_nombre as marca_producto,
+                  COALESCE(m.multiplo, 1) as multiplo
+          FROM automarc_automarco.tbl_productos2 AS a
+          INNER JOIN automarc_automarco.tbl_clasificacion2 AS d ON a.cla_id2=d.cla_id2
+          LEFT JOIN automarc_automarco.tbl_especificacion j on a.espe_id = j.espe_id
+          INNER JOIN automarc_automarco.tbl_productos_modelos_2 f on a.prod_id = f.prod_id
+          INNER JOIN automarc_automarco.tbl_marcas_productos k on a.marca_id = k.marca_id
+          LEFT JOIN automarc_automarco.tbl_prod_img2 b on a.prod_id = b.prod_id
+          INNER JOIN automarc_automarco.tbl_marcas_2 e on f.marca_id = e.marca_id
+          LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.id_mod = g.id_mod
+          INNER JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id
+          INNER JOIN automarc_automarco.tbl_valvulas as t on f.valvulas_id = t.valvula_id
+          LEFT JOIN automarc_automarco.tbl_subfamilia y on y.sf_id = a.sf_id
+          LEFT JOIN automarc_automarco.tbl_combustible z on z.id_combustible = f.id_combustible
+          LEFT JOIN automarc_automarco.tbl_productos_agnos i on f.pm_id = i.pm_id
+          LEFT JOIN automarc_automarco.tbl_productos_multiplos m on m.id_prod = a.prod_id
+          WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id2 = ?
           GROUP by a.prod_id`,
         [cla_id]
       );
@@ -546,7 +558,8 @@ const getProductosPorEmpresaPaginado = async (
                       f.agno_fin,
                       'AUTOTEC' as empresa,
                       a.unidades_caja,
-                      k.marca_nombre as marca_producto
+                      k.marca_nombre as marca_producto,
+                      COALESCE(m.multiplo, 1) as multiplo
               FROM autotec_ecom.tbl_productos AS a
               LEFT JOIN autotec_ecom.tbl_clasificacion AS d ON a.cla_id=d.cla_id
               LEFT JOIN autotec_ecom.tbl_especificacion j on a.espe_id = j.espe_id
@@ -558,6 +571,7 @@ const getProductosPorEmpresaPaginado = async (
               LEFT JOIN automarc_automarco.tbl_cilindrada2 x on x.cilin_id = f.cilindrada_id
               LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
               LEFT JOIN autotec_ecom.tbl_productos_agnos i on f.pm_id = i.pm_id
+              LEFT JOIN autotec_ecom.tbl_productos_multiplos m on m.id_prod = a.prod_id
               WHERE a.prod_estado = 1 and a.prod_precio > 0
               GROUP BY a.prod_id
               LIMIT ? OFFSET ?`,
@@ -591,7 +605,8 @@ const getProductosPorEmpresaPaginado = async (
                     f.agno_fin,
                     'GABTEC' as empresa,
                     k.marca_nombre as marca_producto,
-                    f.version
+                    f.version,
+                    COALESCE(m.multiplo, 1) as multiplo
             FROM gabteccl_sitbdd1978.tbl_productos AS a
             LEFT JOIN gabteccl_sitbdd1978.tbl_clasificacion AS d ON a.cla_id=d.cla_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_especificacion j on a.espe_id = j.espe_id
@@ -603,6 +618,7 @@ const getProductosPorEmpresaPaginado = async (
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
             left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
+            LEFT JOIN gabteccl_sitbdd1978.tbl_productos_multiplos m on m.id_prod = a.prod_id
             WHERE (a.prod_estado = 1 or a.prod_estado2 = 1)
             LIMIT ? OFFSET ?`,
         [limit, offset]
@@ -646,7 +662,8 @@ const getProductosPorEmpresaPaginado = async (
                   f.agno_inicio,
                   f.agno_fin,
                   'AUTOMARCO' as empresa,
-                  k.marca_nombre as marca_producto
+                  k.marca_nombre as marca_producto,
+                  COALESCE(m.multiplo, 1) as multiplo
           FROM automarc_automarco.tbl_productos2 AS a
           INNER JOIN automarc_automarco.tbl_clasificacion2 AS d ON a.cla_id2=d.cla_id2
           LEFT JOIN automarc_automarco.tbl_especificacion j on a.espe_id = j.espe_id
@@ -660,6 +677,7 @@ const getProductosPorEmpresaPaginado = async (
           LEFT JOIN automarc_automarco.tbl_subfamilia y on y.sf_id = a.sf_id
           LEFT JOIN automarc_automarco.tbl_combustible z on z.id_combustible = f.id_combustible
           LEFT JOIN automarc_automarco.tbl_productos_agnos i on f.pm_id = i.pm_id
+          LEFT JOIN automarc_automarco.tbl_productos_multiplos m on m.id_prod = a.prod_id
           WHERE a.prod_estado = 1 and a.prod_precio > 0
           GROUP by a.prod_id
           LIMIT ? OFFSET ?`,
