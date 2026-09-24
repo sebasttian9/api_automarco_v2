@@ -118,6 +118,14 @@ components:
           type: integer
           description: Stock disponible.
           example: 2
+        multiplo:
+          type: integer
+          nullable: true
+          description: >
+            Múltiplo de compra: la cantidad pedida en `/pedidos` debe ser un
+            múltiplo de este número (ej. si es 6, se puede pedir 6, 12, 18...
+            pero no 10). `null` o 0 si el producto no tiene restricción.
+          example: 6
         espe_nombre:
           type: string
           description: Especificación técnica (ej. Gas, Hidráulico).
@@ -377,8 +385,7 @@ paths:
       description: |
         Emite un JWT nuevo para el cliente, sin depender de que el equipo lo
         regenere manualmente. Requiere la **api-key fija** entregada al crear
-        el acceso (junto con el primer token, ver `generartokendb.js`) — no el
-        token JWT, que puede estar vencido.
+        el acceso.
 
         No requiere `Authorization` — es el punto de entrada cuando el JWT ya
         no sirve. Limitado a 5 intentos/minuto por rut (protección contra
@@ -579,14 +586,24 @@ paths:
           por modelo sin marca).
         - Si no envías **ningún** filtro (`cla_id`, `marca_id`, `modelo_id`, `cili_id`,
           `agno`), debes enviar `empresa` (`AUTOMARCO`, `AUTOTEC` o `GABTEC`) y se
-          retorna el catálogo completo **de esa empresa**, paginado (`page`/`limits`,
-          igual formato que `/recetas`).
+          retorna el catálogo completo **de esa empresa**, paginado (`page`/`limits`).
 
         **Modos de búsqueda:**
-        1. **Por Categoría:** Enviar solo `cla_id`.
+        1. **Por Categoría:** Enviar solo `cla_id`. las siguientes ID´s son universales y puede enviarse sole el cla_id 2, 9, 12, 15, 16, 18, 22, 23, 25, 31, 37, 48, 49, 54
         2. **Por Vehículo:** Enviar `cla_id`, `marca_id`, `modelo_id`, `cili_id` y/o `agno` (los que apliquen).
         3. **Catálogo completo de una empresa:** No enviar ningún filtro, solo `empresa` (+ `page`/`limits` opcionales).
-        las siguientes ID´s son universales y puede enviarse sole el cla_id 2, 9, 12, 15, 16, 18, 22, 23, 25, 31, 37, 48, 49, 54
+
+        **Filtrar por empresa (opcional):** en los modos 1 y 2 también se puede
+        enviar `empresa` para que solo se consulte esa empresa (ej. `cla_id` +
+        `empresa: "AUTOMARCO"` retorna solo productos de AUTOMARCO). Si no se
+        envía, se consultan las 3 empresas donde el cliente tiene permiso.
+
+        **Paginación (todos los modos):** la respuesta siempre viene paginada con
+        `page` (default 1) y `limits` (default 500, máximo 500), en el formato
+        `{ info, results }`. Cuando se consultan varias empresas, se paginan como
+        una sola lista: primero AUTOMARCO, luego AUTOTEC y luego GABTEC. Para traer
+        todo, recorre las páginas hasta que `info.next_page` sea `null`.
+        
 
         **Precio con descuento (opcional):** si se envía `sucursales`, cada producto
         incluye además `descuento` y `precio_final` calculados contra la sucursal de
@@ -628,17 +645,19 @@ paths:
                 empresa:
                   type: string
                   description: |
-                    Obligatorio solo si no se envía ningún filtro anterior. Empresa cuyo
-                    catálogo completo se quiere listar paginado.
+                    Opcional. Si se envía junto a otros filtros, limita la búsqueda a
+                    esa empresa. Obligatorio solo si no se envía ningún filtro
+                    anterior (lista el catálogo completo de esa empresa, paginado).
+                    Un valor distinto a los permitidos responde `400`.
                   enum: [AUTOMARCO, AUTOTEC, GABTEC]
                   example: AUTOMARCO
                 page:
                   type: integer
-                  description: Página a listar (solo aplica en modo "catálogo completo"). Default 1.
+                  description: Página a listar. Default 1.
                   example: 1
                 limits:
                   type: integer
-                  description: Tamaño de página (solo aplica en modo "catálogo completo"). Default 500, máximo 500.
+                  description: Tamaño de página. Default 500, máximo 500.
                   example: 20
                 sucursales:
                   type: object
@@ -662,11 +681,22 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Producto'
+                type: object
+                properties:
+                  info:
+                    type: object
+                    properties:
+                      total_records: { type: integer, example: 134 }
+                      total_pages: { type: integer, example: 7 }
+                      current_page: { type: integer, example: 1 }
+                      next_page: { type: integer, nullable: true, example: 2 }
+                      prev_page: { type: integer, nullable: true, example: null }
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Producto'
         '400':
-          description: Faltan parámetros obligatorios.
+          description: Faltan parámetros obligatorios o `empresa` no es válida.
         '401':
           description: Token no proporcionado o inválido.
         '500':
@@ -677,26 +707,22 @@ paths:
       summary: Crear Pedido Unificado (Multi-Empresa)
       description: |
 
-        Este endpoint **ESCRIBE** datos reales en la API y DMZ
+        
 
         **Funcionalidad:**
         - Permite pedidos mixtos (pedidos multiempresa): los productos se agrupan por
-          empresa y se genera un pedido (cabecera + correlativo + reserva en su propia
-          tabla DMZ) independiente por cada una. GABTEC y FRENOS mezclados en el mismo
-          pedido se fusionan en un solo pedido "UNIFICADO", ya que comparten la misma
-          tabla DMZ.
+          empresa y se genera un pedido independiente por cada una.
         - **Transporte obligatorio:** hay que enviar `tran_id` o `tran_nombre`; si
           faltan ambos, se rechaza con `400`.
         - **Sucursal obligatoria por empresa:** cada empresa presente en `productos`
           necesita su sucursal en `sucursales`. Cada empresa despacha desde la
-          sucursal que el cliente eligió para ella — ya no se exige que las
-          direcciones coincidan entre empresas.
+          sucursal que el cliente eligió para ella.
         - **Permisos y sucursales parciales:** si el cliente no tiene permiso en una
           empresa, o no se indicó sucursal para ella, o la sucursal indicada no
           existe para el cliente, esa empresa se excluye del pedido (no corta el
           resto) y queda listada en `alertas`. Si **ninguna** empresa del pedido
           termina con permiso y sucursal válida, no se crea nada: responde `403`
-          si el motivo es falta de permiso en todas, o `400` si alguna tenía
+          si el motivo es falta de permiso en todas, o `400` si alguna tenías
           permiso pero ninguna tenía sucursal válida — en ambos casos con
           `alertas` detallando el motivo por empresa.
 
@@ -748,9 +774,11 @@ paths:
                         type: string
                         description: Código del producto
                         example: "70012-6"
-                      cantidad: 
+                      cantidad:
                         type: integer
-                        description: Cantidad a comprar
+                        description: >
+                          Cantidad a comprar. Si el producto tiene `multiplo`
+                          (ver /products), debe ser un múltiplo de ese valor.
                         example: 10
                   example:
                     - sku: "70012-6"
@@ -811,7 +839,7 @@ paths:
   /buscar-prod/{id}:
     get:
       summary: Ficha de un producto por SKU
-      description: Busca el producto en las 5 empresas y agrega sus equivalencias OEM.
+      description: Busca el producto y agrega sus equivalencias OEM.
       tags:
         - Productos
       parameters:

@@ -25,10 +25,37 @@ const aplicarDescuentosPorSucursal = async (productos, rut, sucursales) => {
   }));
 };
 
+// Pagina a nivel SQL sobre varias empresas como si fueran una sola lista, en el
+// mismo orden en que antes se concatenaban (AUTOMARCO, AUTOTEC, GABTEC).
+// fuentes: funciones (pag) => consulta, donde pag es { count: true } para contar
+// o { limit, offset } para traer esa porcion. Primero se cuenta cada empresa y
+// luego solo se consultan las que caen dentro de la pagina pedida.
+const paginarFuentes = async (fuentes, limit, page) => {
+  const totales = await Promise.all(fuentes.map((f) => f({ count: true })));
+  const total = totales.reduce((acc, t) => acc + (Number(t) || 0), 0);
+
+  let offset = (page - 1) * limit;
+  let restante = limit;
+  let rows = [];
+
+  for (let i = 0; i < fuentes.length && restante > 0; i++) {
+    const totalFuente = Number(totales[i]) || 0;
+    if (offset >= totalFuente) { offset -= totalFuente; continue; }
+
+    const cantidad = Math.min(restante, totalFuente - offset);
+    const parte = await fuentes[i]({ limit: cantidad, offset });
+    rows = rows.concat(parte || []);
+    restante -= cantidad;
+    offset = 0;
+  }
+
+  return { rows, total };
+};
+
 const getProducts = async (
   token,
   order_by = "nombre__ASC",
-  limits = 3,
+  limits = 500,
   page = 1,
   cla_id = null,
   marca = null,
@@ -36,23 +63,20 @@ const getProducts = async (
   cilindrada = null,
   agno = null,
   rut = null,
-  sucursales = null
+  sucursales = null,
+  empresa = null
 ) => {
   const db = await connection;
   try {
-    let Productos_automarco = [];
-    let productos_autotec = [];
-    let productos_gabtec = [];
-    let resultado_final = [];
-
+    // empresa opcional: si viene, solo se consulta esa; si no, todas las permitidas.
+    const incluye = (emp) => !empresa || empresa === emp;
+    const fuentes = [];
 
     const permisos = await obtenerPermisos(token);
-    console.log("Token usado:", token);
-    console.log("Permisos devueltos:", permisos);
 
     if (!permisos) {
         console.log("Token inválido o sin permisos");
-        return [];
+        return { data: [], total: 0 };
     }
 
     // cla_id es opcional. Cuando viene, se resuelve contra gestioncar.tbl_clasificaciones
@@ -69,76 +93,72 @@ const getProducts = async (
       );
 
       // Si no encuentra clasificación, retorna vacío
-      if (clasificaciones.length === 0) return [];
+      if (clasificaciones.length === 0) return { data: [], total: 0 };
+
+      //  AUTOMARCO
+      if (incluye("AUTOMARCO") && clasificaciones[0].automarco_cla_id > 0 && permisos.automarco == 1) {
+        fuentes.push((pag) => consultaPorEmpresa("AUTOMARCO", {
+          cla_id: clasificaciones[0].automarco_cla_id, marca, modelo, agno, cilindrada
+        }, pag));
+      }
 
       //  AUTOTEC
-      if (clasificaciones[0].autotec_cla_id > 0 && permisos.autotec == 1) {
-        productos_autotec = await consultaPorEmpresa("AUTOTEC", {
+      if (incluye("AUTOTEC") && clasificaciones[0].autotec_cla_id > 0 && permisos.autotec == 1) {
+        fuentes.push((pag) => consultaPorEmpresa("AUTOTEC", {
           cla_id: clasificaciones[0].autotec_cla_id, marca, modelo, agno, cilindrada
-        });
+        }, pag));
       }
 
       //  GABTEC
-      if (clasificaciones[0].gabtec_cla_id > 0 && permisos.gabtec == 1) {
-        productos_gabtec = await consultaPorEmpresa("GABTEC", {
+      if (incluye("GABTEC") && clasificaciones[0].gabtec_cla_id > 0 && permisos.gabtec == 1) {
+        fuentes.push((pag) => consultaPorEmpresa("GABTEC", {
           cla_id: clasificaciones[0].gabtec_cla_id, marca, modelo, agno, cilindrada
-        });
-      }
-
-      //  AUTOMARCO
-      if (clasificaciones[0].automarco_cla_id > 0 && permisos.automarco == 1) {
-        Productos_automarco = await consultaPorEmpresa("AUTOMARCO", {
-          cla_id: clasificaciones[0].automarco_cla_id, marca, modelo, agno, cilindrada
-        });
+        }, pag));
       }
     } else {
-      if (permisos.autotec == 1) {
-        productos_autotec = await consultaPorEmpresa("AUTOTEC", { marca, modelo, agno, cilindrada });
+      if (incluye("AUTOMARCO") && permisos.automarco == 1) {
+        fuentes.push((pag) => consultaPorEmpresa("AUTOMARCO", { marca, modelo, agno, cilindrada }, pag));
       }
-      if (permisos.gabtec == 1) {
-        productos_gabtec = await consultaPorEmpresa("GABTEC", { marca, modelo, agno, cilindrada });
+      if (incluye("AUTOTEC") && permisos.autotec == 1) {
+        fuentes.push((pag) => consultaPorEmpresa("AUTOTEC", { marca, modelo, agno, cilindrada }, pag));
       }
-      if (permisos.automarco == 1) {
-        Productos_automarco = await consultaPorEmpresa("AUTOMARCO", { marca, modelo, agno, cilindrada });
+      if (incluye("GABTEC") && permisos.gabtec == 1) {
+        fuentes.push((pag) => consultaPorEmpresa("GABTEC", { marca, modelo, agno, cilindrada }, pag));
       }
     }
 
-    // Unir resultados
-    resultado_final = [].concat(
-      Productos_automarco || [],
-      productos_autotec || [],
-      productos_gabtec || []
-    );
+    const { rows, total } = await paginarFuentes(fuentes, limits, page);
 
-    resultado_final = await aplicarDescuentosPorSucursal(resultado_final, rut, sucursales);
+    // el descuento se calcula solo para los productos de la pagina
+    const data = await aplicarDescuentosPorSucursal(rows, rut, sucursales);
 
-    return resultado_final;
+    return { data, total };
 
   } catch (error) {
     console.error("Error al obtener datos:", error);
-    return [];
+    return { data: [], total: 0 };
   }
 };
 
 const getProductsCategory = async (
   token,
   order_by = "nombre__ASC",
-  limits = 3,
+  limits = 500,
   page = 1,
   cla_id = 0,
   rut = null,
-  sucursales = null
+  sucursales = null,
+  empresa = null
 ) => {
   const db = await connection;
   try {
-    let Productos_automarco = [];
-    let productos_autotec = [];
-    let productos_gabtec = [];
-    let resultado_final = [];
+    // empresa opcional: si viene, solo se consulta esa; si no, todas las permitidas.
+    const incluye = (emp) => !empresa || empresa === emp;
+    const fuentes = [];
 
     // --- PASO A: VALIDAR PERMISOS ---
     const permisos = await obtenerPermisos(token);
-    if (!permisos) return [];
+    if (!permisos) return { data: [], total: 0 };
 
     // validar la clasificacion
     const [clasificaciones, fields] = await db.execute(
@@ -146,48 +166,47 @@ const getProductsCategory = async (
       [cla_id]
     );
 
-    if (clasificaciones.length === 0) return [];
+    if (clasificaciones.length === 0) return { data: [], total: 0 };
 
     // --- PASO B: CONSULTAS CON DOBLE VALIDACIÓN ---
 
-    // 1. AUTOTEC
-    if (clasificaciones[0].autotec_cla_id > 0 && permisos.autotec == 1) {
-      productos_autotec = await consultaPorEmpresaSoloClasificacion(
-        "AUTOTEC",
-        clasificaciones[0].autotec_cla_id
-      );
-    }
-
-    // 2. GABTEC
-    if (clasificaciones[0].gabtec_cla_id > 0 && permisos.gabtec == 1) {
-      productos_gabtec = await consultaPorEmpresaSoloClasificacion(
-        "GABTEC",
-        clasificaciones[0].gabtec_cla_id
-      );
-    }
-
-    // 3. AUTOMARCO
-    if (clasificaciones[0].automarco_cla_id > 0 && permisos.automarco == 1) {
-      Productos_automarco = await consultaPorEmpresaSoloClasificacion(
+    // 1. AUTOMARCO
+    if (incluye("AUTOMARCO") && clasificaciones[0].automarco_cla_id > 0 && permisos.automarco == 1) {
+      fuentes.push((pag) => consultaPorEmpresaSoloClasificacion(
         "AUTOMARCO",
-        clasificaciones[0].automarco_cla_id
-      );
-      
+        clasificaciones[0].automarco_cla_id,
+        pag
+      ));
     }
 
-    resultado_final = [].concat(
-      Productos_automarco || [],
-      productos_autotec || [],
-      productos_gabtec || []
-    );
+    // 2. AUTOTEC
+    if (incluye("AUTOTEC") && clasificaciones[0].autotec_cla_id > 0 && permisos.autotec == 1) {
+      fuentes.push((pag) => consultaPorEmpresaSoloClasificacion(
+        "AUTOTEC",
+        clasificaciones[0].autotec_cla_id,
+        pag
+      ));
+    }
 
-    resultado_final = await aplicarDescuentosPorSucursal(resultado_final, rut, sucursales);
+    // 3. GABTEC
+    if (incluye("GABTEC") && clasificaciones[0].gabtec_cla_id > 0 && permisos.gabtec == 1) {
+      fuentes.push((pag) => consultaPorEmpresaSoloClasificacion(
+        "GABTEC",
+        clasificaciones[0].gabtec_cla_id,
+        pag
+      ));
+    }
 
-    return resultado_final;
+    const { rows, total } = await paginarFuentes(fuentes, limits, page);
+
+    // el descuento se calcula solo para los productos de la pagina
+    const data = await aplicarDescuentosPorSucursal(rows, rut, sucursales);
+
+    return { data, total };
 
   } catch (error) {
     console.error("Error al obtener datos:", error);
-    return [];
+    return { data: [], total: 0 };
   }
 };
 
@@ -198,9 +217,24 @@ export {
     // ... exporta las otras (getStock, consultaPorEmpresa, etc)
 };
 
+// pag (opcional): { count: true } retorna solo la cantidad de filas; { limit, offset }
+// retorna esa porcion ordenada por prod_id (orden estable entre paginas); sin pag,
+// retorna todo como antes. Se usa query (no execute) porque LIMIT/OFFSET como
+// parametros no funcionan bien con prepared statements de mysql2.
+const ejecutarConsulta = async (sql, params, pag) => {
+  if (pag && pag.count) {
+    const [r] = await connection.query(`SELECT COUNT(*) AS total FROM (${sql}) t`, params);
+    return [r[0].total]; // mismo formato [filas, fields] que execute/query
+  }
+  if (pag && pag.limit) {
+    return connection.query(`${sql} ORDER BY a.prod_id LIMIT ? OFFSET ?`, [...params, pag.limit, pag.offset]);
+  }
+  return connection.execute(sql, params);
+};
+
 // filtros: { cla_id, marca, modelo, agno, cilindrada } - todos opcionales.
 // Solo se agrega al WHERE la condicion de los campos que efectivamente vengan.
-const consultaPorEmpresa = async (empresa, filtros = {}) => {
+const consultaPorEmpresa = async (empresa, filtros = {}, pag = null) => {
   const { cla_id, marca, modelo, agno, cilindrada } = filtros;
   try {
     let resultado = [];
@@ -215,7 +249,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
       if (agno) { condiciones.push("i.prod_agno = ?"); params.push(agno); }
       if (cilindrada) { condiciones.push("x.cilin_id = ?"); params.push(cilindrada); }
 
-      const [producstAutotec, fields] = await connection.execute(
+      const [producstAutotec, fields] = await ejecutarConsulta(
         `SELECT DISTINCT
                       a.prod_id,
                       a.id_prov,
@@ -250,7 +284,8 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
               LEFT JOIN autotec_ecom.tbl_productos_multiplos m on m.id_prod = a.prod_id
               WHERE ${condiciones.join(" and ")}
               GROUP BY a.prod_id`,
-        params
+        params,
+        pag
       );
 
       resultado = producstAutotec;
@@ -266,7 +301,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
       // Nota: GABTEC no tiene join a la tabla de cilindrada, por lo que ese filtro
       // no se puede aplicar aqui (ya era asi antes de este cambio).
 
-      const [producsGabtec, fields] = await connection.execute(
+      const [producsGabtec, fields] = await ejecutarConsulta(
         `SELECT DISTINCT
                     a.prod_id,
                     a.id_prov,
@@ -281,7 +316,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
                     g.mod_id,
                     c.ubi_nombre,
                     h.origen,
-                    k.traccion,
+                    l.traccion,
                     f.agno_inicio,
                     f.agno_fin,
                     'GABTEC' as empresa,
@@ -297,11 +332,12 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
             LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
-            left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
+            left join automarc_automarco.tbl_traccion l on f.traccion_id = l.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_productos_multiplos m on m.id_prod = a.prod_id
             WHERE ${condiciones.join(" and ")}`,
-        params
+        params,
+        pag
       );
       resultado = producsGabtec;
     }
@@ -315,7 +351,7 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
       if (agno) { condiciones.push("i.prod_agno = ?"); params.push(agno); }
       if (cilindrada) { condiciones.push("x.cilin_id = ?"); params.push(cilindrada); }
 
-      const [producstAutomarco, fields] = await connection.execute(
+      const [producstAutomarco, fields] = await ejecutarConsulta(
         `SELECT
                   a.prod_id,
                   a.id_prov_2 as id_prov,
@@ -353,26 +389,28 @@ const consultaPorEmpresa = async (empresa, filtros = {}) => {
           LEFT JOIN automarc_automarco.tbl_productos_multiplos m on m.id_prod = a.prod_id
           WHERE ${condiciones.join(" and ")}
           GROUP by a.prod_id`,
-        params
+        params,
+        pag
       );
 
       resultado = producstAutomarco;
     }
 
-    return resultado;
+    // en modo conteo, el destructuring [filas, fields] ya deja la cantidad en resultado
+    return pag && pag.count ? (Number(resultado) || 0) : resultado;
   } catch (error) {
     console.error("Error al obtener datos:", error);
   }
 };
 
-const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
+const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id, pag = null) => {
   // const db = await connect();
   try {
     let resultado = [];
     console.log(empresa);
 
     if (empresa == "AUTOTEC") {
-      const [producstAutotec, fields] = await connection.execute(
+      const [producstAutotec, fields] = await ejecutarConsulta(
         `SELECT DISTINCT
                       a.prod_id,
                       a.id_prov,
@@ -406,14 +444,15 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
               LEFT JOIN autotec_ecom.tbl_productos_multiplos m on m.id_prod = a.prod_id
               WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id = ?
               GROUP BY a.prod_id`,
-        [cla_id]
+        [cla_id],
+        pag
       );
 
       resultado = producstAutotec;
     }
 
     if (empresa == "GABTEC") {
-      const [producsGabtec, fields] = await connection.execute(
+      const [producsGabtec, fields] = await ejecutarConsulta(
         `SELECT DISTINCT
                     a.prod_id,
                     a.id_prov,
@@ -428,7 +467,7 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
                     g.mod_id,
                     c.ubi_nombre,
                     h.origen,
-                    k.traccion,
+                    l.traccion,
                     f.agno_inicio,
                     f.agno_fin,
                     'GABTEC' as empresa,
@@ -444,19 +483,20 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
             LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
-            left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
+            left join automarc_automarco.tbl_traccion l on f.traccion_id = l.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_productos_multiplos m on m.id_prod = a.prod_id
             WHERE a.prod_estado = 1 and a.prod_id not in ('92989-1','92676-0','92648-5','93038-5','92499-7','93036-9','92634-5','93039-3','93061-K',
             '93062-8','93063-6') and d.cla_id = ? `,
-        [cla_id]
+        [cla_id],
+        pag
       );
       console.log(producsGabtec);
       resultado = producsGabtec;
     }
 
     if (empresa == "AUTOMARCO") {
-      const [producstAutomarco, fields] = await connection.execute(
+      const [producstAutomarco, fields] = await ejecutarConsulta(
         `SELECT
                   a.prod_id,
                   a.id_prov_2 as id_prov,
@@ -494,14 +534,16 @@ const consultaPorEmpresaSoloClasificacion = async (empresa, cla_id) => {
           LEFT JOIN automarc_automarco.tbl_productos_multiplos m on m.id_prod = a.prod_id
           WHERE a.prod_estado = 1 and a.prod_precio > 0 and d.cla_id2 = ?
           GROUP by a.prod_id`,
-        [cla_id]
+        [cla_id],
+        pag
       );
 
       console.log(producstAutomarco);
       resultado = producstAutomarco;
     }
 
-    return resultado;
+    // en modo conteo, el destructuring [filas, fields] ya deja la cantidad en resultado
+    return pag && pag.count ? (Number(resultado) || 0) : resultado;
   } catch (error) {
     console.error("Error al obtener datos:", error);
   }
@@ -600,7 +642,7 @@ const getProductosPorEmpresaPaginado = async (
                     g.mod_id,
                     c.ubi_nombre,
                     h.origen,
-                    k.traccion,
+                    l.traccion,
                     f.agno_inicio,
                     f.agno_fin,
                     'GABTEC' as empresa,
@@ -616,7 +658,7 @@ const getProductosPorEmpresaPaginado = async (
             LEFT JOIN automarc_automarco.tbl_modelos_marcas_2 g on f.mod_id = g.mod_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_productos_agnos i on f.pm_id = i.pm_id
             left join gabteccl_sitbdd1978.tbl_ubicacion as c on f.ubi_id=c.ubi_id
-            left join automarc_automarco.tbl_traccion k on f.traccion_id = k.traccion_id
+            left join automarc_automarco.tbl_traccion l on f.traccion_id = l.traccion_id
             left join automarc_automarco.tbl_origen h on h.origen_id = f.origen_id
             LEFT JOIN gabteccl_sitbdd1978.tbl_productos_multiplos m on m.id_prod = a.prod_id
             WHERE (a.prod_estado = 1 or a.prod_estado2 = 1)
