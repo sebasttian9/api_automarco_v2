@@ -7,7 +7,7 @@ info:
 
     **Rate limiting:** por cliente (rut del token), 100 solicitudes/minuto para
     endpoints de lectura y 20 solicitudes/minuto para los de escritura
-    (`/pedidos`, `/ordenes-disam`). Al exceder el límite responde `429 Too Many
+    (`/pedidos`). Al exceder el límite responde `429 Too Many
     Requests` con headers estándar (`RateLimit-*`, `Retry-After`).
 
 servers:
