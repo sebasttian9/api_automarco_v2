@@ -16,11 +16,17 @@ import YAML from "yamljs";
 import path from 'path';
 import clientRoutes from './config/routes/sucursalesRoutes.js';
 import authRoutes from './config/routes/authRoutes.js';
+import planetRoutes from './config/routes/planetRoutes.js';
 const app = express();
 
 
 const swaggerDocument = YAML.load(path.join(process.cwd(), 'swagger.yaml'));
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
+// Webhook de Grupo Planet: se monta ANTES del express.json() global porque trae
+// su propio parser con limite de 40 MB (la OC incluye el PDF en base64) y usa
+// autenticacion Basic en vez del JWT (ver config/routes/planetRoutes.js).
+app.use("/api/v2", planetRoutes);
 
 
 app.use(express.json());

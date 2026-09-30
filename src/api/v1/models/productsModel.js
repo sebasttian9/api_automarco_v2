@@ -616,16 +616,27 @@ const insertPedidoEmpresa = async (db, grupo) => {
     );
 
     //inserta cabecera del pedido en base pedidos_api
-    const sqlHeader = `
-        INSERT INTO bd_api_automarco.tbl_pedidos
-        (fecha, estado, empresa, pedvenrut, pedcorint, tran_nombre, cli_rut, cli_sec, cli_conven)
-        VALUES (NOW(), 0, ?, ?, ?, ?, ?, ?, ?)
-    `;
-
+    const columnasHeader = ["empresa", "pedvenrut", "pedcorint", "tran_nombre", "cli_rut", "cli_sec", "cli_conven"];
     const valuesHeader = [
         grupo.empresa, config.pedvenrut, grupo.pedcorint, grupo.tran_nombre, grupo.rut,
         grupo.cli_sec, grupo.cli_conven
     ];
+
+    // OC del cliente (hoy solo /pedidos-planet): el proceso que completa la
+    // inyeccion en la DMZ la escribe en la observacion como "OC:{numero}:{ddmmaaaa}"
+    // para que salga en la factura. Las columnas solo se incluyen si viene OC, asi
+    // /pedidos sigue funcionando aunque el ALTER de sql/planet_oc.sql no se haya
+    // corrido todavia.
+    if (grupo.oc_numero) {
+        columnasHeader.push("oc_numero", "oc_fecha");
+        valuesHeader.push(grupo.oc_numero, grupo.oc_fecha || null);
+    }
+
+    const sqlHeader = `
+        INSERT INTO bd_api_automarco.tbl_pedidos
+        (fecha, estado, ${columnasHeader.join(", ")})
+        VALUES (NOW(), 0, ${columnasHeader.map(() => "?").join(", ")})
+    `;
 
     const [resultHeader] = await db.execute(sqlHeader, valuesHeader);
     const idPedidoGenerado = resultHeader.insertId;

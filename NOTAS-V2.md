@@ -92,3 +92,50 @@ en `/pedidos`), I3 (`/ocdefinitiva` y `/stock` sin chequeo de permisos), I4 (pag
 ignorada en `/products`), y el resto de los hallazgos "I" del plan de pruebas —
 ninguno de estos se tocó en esta pasada, quedan para una siguiente ronda si el
 equipo lo prioriza.
+
+## Webhook de OC de Grupo Planet (`POST /api/v2/pedidos-planet`) — en preparación
+
+Grupo Planet ("Venta en Verde", punto 6.2 de su documento para proveedores) envía cada
+OC emitida a nuestro nombre a un endpoint nuestro, con autenticación **Basic**
+(usuario/contraseña que les entregamos) y el PDF de la OC en base64. Esperan cuerpo
+vacío + `200`, o el código de error que corresponda. Si no reciben `200` **reintentan
+hasta 3 veces** y después avisan a su equipo interno.
+
+- **No está en `swagger.yaml`** a propósito: es una integración con un solo cliente
+  (igual que `/ordenes-disam`).
+- Tablas: `sql/planet_oc.sql` (hay que ejecutarlo antes de habilitar el endpoint).
+- Flujo: cada OC se guarda completa en `tbl_planet_oc` **antes** de procesarla; si
+  falla queda `con_error` con el motivo y se avisa por correo (`NOTIFICAR_PLANET_A`).
+  El correo se envía una vez por motivo, no en cada reintento. Si la misma OC vuelve a
+  llegar: si estaba procesada → `200` sin duplicar; si había fallado → se reprocesa;
+  si otra petición la está procesando en ese momento → `409` (sin duplicar).
+  El pedido y el estado `procesada` se graban en la misma transacción.
+- Respuestas: `200` vacío (ok o duplicada), `400` (sin número de OC / sin items),
+  `401` (credenciales), `409` (la misma OC se está procesando), `422` (problema de
+  contenido: SKU, sucursal, cantidad), `500` (error nuestro).
+
+**Confirmado por Planet (2026-09-29):**
+
+- Envían **una OC por empresa** (Gabtec, Automarco, Autotec). La empresa se sigue
+  deduciendo del SKU, como en `/pedidos`; si alguna vez llega mezclada, se genera un
+  pedido por empresa y queda una alerta.
+- Nuestro SKU viene **siempre** en `items[].orden_servicio`. `tbl_planet_productos`
+  queda solo como respaldo por si algún ítem viniera sin él.
+- Reintentan 3 veces y luego avisan a su equipo interno.
+- `items[].precio` es el precio **sin descuento**, y el descuento viene en
+  `items[].descuento_porcentaje`.
+- La dirección de despacho de cada sucursal es fija → el mapeo de
+  `tbl_planet_despachos` por dirección es estable.
+- La factura debe llevar el número y la fecha de la OC → se guardan en
+  `tbl_pedidos.oc_numero` / `oc_fecha` (ALTER en `sql/planet_oc.sql`). El proceso que
+  completa la inyección en la DMZ (fuera de este repo) debe leerlos y escribir la
+  observación con formato `OC:{numero}:{ddmmaaaa}`. Una OC sin fecha válida no se procesa.
+
+**Supuestos que siguen abiertos:**
+
+1. El cliente de los pedidos es siempre Grupo Planet → `PLANET_CLIENTE_RUT` fijo.
+2. Transporte fijo (`PLANET_TRANSPORTE`), la OC no lo trae.
+3. Se guarda nuestro **precio de lista + descuento** (igual que `/pedidos`); si el
+   precio o el descuento de la OC no coinciden con los nuestros, se procesa igual y
+   queda como alerta (y se avisa por correo).
+4. No se valida `multiplo` ni stock.

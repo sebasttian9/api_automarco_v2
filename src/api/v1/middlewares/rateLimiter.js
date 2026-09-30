@@ -49,4 +49,16 @@ const authLimiter = rateLimit({
     handler: responderLimiteExcedido,
 });
 
-export { lecturaLimiter, escrituraLimiter, authLimiter };
+// Webhook de Grupo Planet (POST /pedidos-planet): corre antes de la
+// autenticacion Basic, asi que se limita por IP. Holgado para una rafaga de OC,
+// pero corta un intento de fuerza bruta contra el usuario/contraseña.
+const planetLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => ipKeyGenerator(req.ip),
+    handler: responderLimiteExcedido,
+});
+
+export { lecturaLimiter, escrituraLimiter, authLimiter, planetLimiter };

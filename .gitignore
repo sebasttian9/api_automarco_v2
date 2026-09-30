@@ -8,3 +8,6 @@ node_modules/
 
 # Logs de la aplicacion (crecen sin limite hoy, ver hallazgo I12 del plan de pruebas)
 logs/
+
+# PDFs de OC recibidas por /pedidos-planet (datos de negocio, no codigo)
+storage/
