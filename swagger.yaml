@@ -839,7 +839,12 @@ paths:
   /buscar-prod/{id}:
     get:
       summary: Ficha de un producto por SKU
-      description: Busca el producto y agrega sus equivalencias OEM.
+      description: |
+        Busca el producto y agrega sus equivalencias OEM.
+
+        Solo considera las empresas en las que el cliente tiene permiso. Si el SKU
+        existe únicamente en empresas sin permiso, responde `404`, igual que si no
+        existiera (mismo criterio que `/products`).
       tags:
         - Productos
       parameters:
@@ -852,9 +857,11 @@ paths:
         '200':
           description: Producto encontrado.
         '404':
-          description: Producto no encontrado.
+          description: Producto no encontrado (o solo existe en empresas sin permiso para el cliente).
         '401':
           description: No autorizado.
+        '403':
+          description: No fue posible verificar los permisos del cliente.
 
   /cod-publicacion/{id}:
     get:

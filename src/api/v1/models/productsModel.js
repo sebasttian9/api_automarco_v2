@@ -64,12 +64,22 @@ const obtenerEmpresa = async (prod_id) => {
   }
 };
 
+// Empresa(s) donde existe el SKU, limitadas a las que el cliente tiene permiso.
+// empresasPermitidas: ej. ["AUTOMARCO", "GABTEC", "FRENOS"]; null = sin filtro.
+// Se mantiene el orden de obtenerEmpresa: si el SKU está en varias empresas
+// permitidas, se usa la primera.
+const obtenerEmpresaPermitida = async (prod_id, empresasPermitidas = null) => {
+  const empresas = await obtenerEmpresa(prod_id);
+  if (!empresasPermitidas) return empresas;
+  return empresas.filter((e) => empresasPermitidas.includes(e.empresa));
+};
+
 // Portado desde producción (v1): ficha de un producto por SKU, buscando en la
-// empresa a la que pertenece (vía obtenerEmpresa).
-const getProductById = async (prod_id) => {
+// empresa a la que pertenece (vía obtenerEmpresa), solo entre las permitidas.
+const getProductById = async (prod_id, empresasPermitidas = null) => {
   try {
     let resultado = [];
-    const empresa = await obtenerEmpresa(prod_id);
+    const empresa = await obtenerEmpresaPermitida(prod_id, empresasPermitidas);
 
     if (empresa.length == 0) return [];
 
@@ -139,11 +149,12 @@ const getProductById = async (prod_id) => {
   }
 };
 
-// Portado desde producción: códigos OEM equivalentes de un producto.
-const getOemById = async (prod_id) => {
+// Portado desde producción: códigos OEM equivalentes de un producto (misma
+// elección de empresa que getProductById).
+const getOemById = async (prod_id, empresasPermitidas = null) => {
   try {
     let resultado = [];
-    const empresa = await obtenerEmpresa(prod_id);
+    const empresa = await obtenerEmpresaPermitida(prod_id, empresasPermitidas);
 
     if (empresa.length == 0) return [];
 

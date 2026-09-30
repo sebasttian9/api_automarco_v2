@@ -20,6 +20,21 @@ import connection from "../../../../config/bdPedidosApi.js";
 import obtenerPermisos from "../helpers/verificapermiso.js";
 import { ValidationError } from "../helpers/errors.js";
 
+// Empresa -> campo de permiso en tbl_permisos_clientes. FRENOS es una sub-linea
+// de GABTEC en la base de datos (misma tabla de clientes/productos, columna
+// prod_estado2), por eso comparte el permiso.
+const MAPA_PERMISO_EMPRESA = {
+  AUTOMARCO: 'automarco',
+  AUTOTEC: 'autotec',
+  GABTEC: 'gabtec',
+  HD: 'hd',
+  FRENOS: 'gabtec',
+};
+
+// Empresas que el cliente puede ver/comprar según sus permisos.
+const empresasConPermiso = (permisos) =>
+  Object.keys(MAPA_PERMISO_EMPRESA).filter((emp) => permisos[MAPA_PERMISO_EMPRESA[emp]] == 1);
+
 const getStockProductsController = async (req, res) => {
   try {
     const { empresa, codigo, cantidad } = req.params;
@@ -96,16 +111,6 @@ const insertarPedidosRepSolController = async (req, res) => {
                 error_detail: "No fue posible verificar los permisos del cliente."
             });
         }
-
-        // FRENOS es una sub-linea de GABTEC en la base de datos (misma tabla de
-        // clientes/productos, columna prod_estado2), por eso comparte el permiso.
-        const MAPA_PERMISO_EMPRESA = {
-            AUTOMARCO: 'automarco',
-            AUTOTEC: 'autotec',
-            GABTEC: 'gabtec',
-            HD: 'hd',
-            FRENOS: 'gabtec',
-        };
 
         const empresasDelPedido = [...new Set(body.productos.map((p) => p.empresa))];
         const empresasSinPermiso = empresasDelPedido.filter((emp) => {
@@ -269,13 +274,23 @@ const insertarPedidosRepSolController = async (req, res) => {
 };
 
 // Portado desde producción (v1): ficha de un producto por SKU + sus equivalencias OEM.
+// Solo busca en las empresas donde el cliente tiene permiso: si el SKU existe
+// únicamente en empresas sin permiso, responde 404 igual que si no existiera
+// (mismo criterio que /products, que omite esas empresas).
 const getProductbyIdController = async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ message: "El parametro id es requerido!" });
 
-    const product = await getProductById(id);
-    const oem = await getOemById(id);
+    const token = (req.headers['authorization'] || '').replace('Bearer ', '').trim();
+    const permisos = await obtenerPermisos(token);
+    if (!permisos) {
+      return res.status(403).json({ message: "No fue posible verificar los permisos del cliente." });
+    }
+    const empresasPermitidas = empresasConPermiso(permisos);
+
+    const product = await getProductById(id, empresasPermitidas);
+    const oem = await getOemById(id, empresasPermitidas);
     const productsImg = await prepareHateoas(product);
 
     if (productsImg.length > 0) {
