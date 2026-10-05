@@ -328,6 +328,19 @@ const getImagenesProductos = async (limit, offset, empresa) => {
 };
 
 
+// RUT sin puntos ni espacios y con la K en mayuscula: "77.234.743-k" -> "77234743-K"
+const normalizarRut = (rut) => String(rut || "").replace(/[.\s]/g, "").toUpperCase();
+
+// Clientes a los que se les aplica su % de descuento en TODOS los productos,
+// incluidos los netos (prod_desc = 1). Se configura en .env, separados por coma:
+// RUTS_DESCUENTO_SIN_EXCEPCION=77234743-K,12345678-9
+const rutDescuentoSinExcepcion = (rut) =>
+  String(process.env.RUTS_DESCUENTO_SIN_EXCEPCION || "")
+    .split(",")
+    .map(normalizarRut)
+    .filter(Boolean)
+    .includes(normalizarRut(rut));
+
 const obtenerDescuentoEmpresa = async (prod_id, empresa, rut_cliente) => {
   try {
     const rutSeguro = rut_cliente || null;
@@ -366,6 +379,11 @@ const obtenerDescuentoEmpresa = async (prod_id, empresa, rut_cliente) => {
       [rutSeguro]
     );
     const dCliente = descCliente[0]?.descuento || 0;
+
+    // cliente con descuento en todos los productos: no se revisa si es neto
+    if (rutDescuentoSinExcepcion(rutSeguro)) {
+        return dCliente;
+    }
 
     const [infoProducto] = await connection.execute(
       `SELECT prod_desc FROM ${tablaProductos} WHERE prod_id = ?`, 
