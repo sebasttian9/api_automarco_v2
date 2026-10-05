@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_oc (
   numero_oc          VARCHAR(30)  NOT NULL,              -- orden_compra.numero
   fecha_oc           DATE         NULL,                  -- orden_compra.fecha (viene dd.mm.yyyy)
   cliente            VARCHAR(150) NULL,                  -- orden_compra.cliente
-  moneda             VARCHAR(10)  NULL,
+  codigo_cliente     VARCHAR(50)  NULL,                  -- codigo del local tomado de cliente ("AP0031 - Buin" -> AP0031)
+  moneda            VARCHAR(10)  NULL,
   proveedor_rut      VARCHAR(15)  NULL,                  -- nosotros, segun Planet
   proveedor_codigo   VARCHAR(20)  NULL,
   despacho_centro    VARCHAR(150) NULL,
@@ -64,10 +65,12 @@ CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_productos (
   PRIMARY KEY (codigo_planet)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 4) Direccion de despacho de Planet -> sucursal (cli_sec) del cliente Planet,
---    por empresa (los codigos de sucursal NO coinciden entre empresas).
---    direccion_normalizada = despacho.direccion en MAYUSCULAS, sin tildes y con
---    espacios simples (ver normalizarDireccion en helpers/planet.js).
+-- 4) Local de Planet -> sucursal (cli_sec) del cliente Planet, por empresa
+--    (los codigos de sucursal NO coinciden entre empresas).
+--    Se busca primero por codigo_planet = codigo al inicio de orden_compra.cliente
+--    ("AP0031 - Buin" -> AP0031, ver extraerCodigoCliente en helpers/planet.js);
+--    si no hay fila, por direccion_normalizada = despacho.direccion en MAYUSCULAS,
+--    sin tildes y con espacios simples (ver normalizarDireccion).
 --    Para GABTEC y FRENOS se usa la fila de GABTEC (comparten sucursal).
 CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_despachos (
   id                    INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -75,13 +78,15 @@ CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_despachos (
   empresa               VARCHAR(20)  NOT NULL,           -- AUTOMARCO / AUTOTEC / GABTEC / HD
   cli_sec               VARCHAR(10)  NOT NULL,
   descripcion           VARCHAR(150) NULL,               -- nota libre, ej. "AutoPlanet Santa Cruz"
+  codigo_planet         VARCHAR(50)  NULL,               -- codigo del local de Planet, ej. AP0031
   PRIMARY KEY (id),
-  UNIQUE KEY uk_planet_despacho (direccion_normalizada, empresa)
+  UNIQUE KEY uk_planet_despacho (direccion_normalizada, empresa),
+  UNIQUE KEY uk_planet_despacho_codigo (codigo_planet, empresa)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Ejemplo de carga (ajustar con los datos reales de Planet):
--- INSERT INTO bd_api_automarco.tbl_planet_despachos (direccion_normalizada, empresa, cli_sec, descripcion)
--- VALUES ('RAMON SANFURGO 190 SANTA CRUZ', 'AUTOMARCO', '12', 'AutoPlanet Santa Cruz');
+-- INSERT INTO bd_api_automarco.tbl_planet_despachos (direccion_normalizada, empresa, cli_sec, descripcion, codigo_planet)
+-- VALUES ('RAMON SANFURGO 190 SANTA CRUZ', 'AUTOMARCO', '12', 'AutoPlanet Santa Cruz', 'AP0012');
 
 -- ============================================================================
 -- MIGRACION 2026-09-29: solo si las tablas ya se habian creado con la version
@@ -101,3 +106,22 @@ CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_despachos (
 ALTER TABLE bd_api_automarco.tbl_pedidos
   ADD COLUMN oc_numero VARCHAR(30) NULL,
   ADD COLUMN oc_fecha  DATE        NULL;
+
+-- ============================================================================
+-- MIGRACION 2026-10-05: sucursal por codigo del local (orden_compra.cliente).
+-- Correr ANTES de subir la version de la API que la usa: el INSERT/UPDATE de
+-- tbl_planet_oc escribe codigo_cliente.
+-- En una base nueva NO correr esta seccion: los CREATE TABLE de arriba ya traen
+-- estas columnas e indices.
+-- tbl_planet_despachos.codigo_planet ya fue agregada a mano en produccion; el
+-- ADD COLUMN de abajo es solo para bases donde todavia no existe.
+-- Antes del indice unico, revisar que no haya duplicados:
+--   SELECT codigo_planet, empresa, COUNT(*) FROM bd_api_automarco.tbl_planet_despachos
+--   WHERE codigo_planet IS NOT NULL GROUP BY codigo_planet, empresa HAVING COUNT(*) > 1;
+-- ============================================================================
+-- ALTER TABLE bd_api_automarco.tbl_planet_despachos
+--   ADD COLUMN codigo_planet VARCHAR(50) NULL;
+ALTER TABLE bd_api_automarco.tbl_planet_despachos
+  ADD UNIQUE KEY uk_planet_despacho_codigo (codigo_planet, empresa);
+ALTER TABLE bd_api_automarco.tbl_planet_oc
+  ADD COLUMN codigo_cliente VARCHAR(50) NULL AFTER cliente;

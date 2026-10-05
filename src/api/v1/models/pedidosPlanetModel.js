@@ -35,7 +35,7 @@ const guardarOCRecibida = async (oc, existenteId = null) => {
     const valores = [
       oc.fecha_oc, oc.cliente, oc.moneda, oc.proveedor_rut, oc.proveedor_codigo,
       oc.despacho_centro, oc.despacho_direccion, oc.total_neto, oc.total_bruto,
-      oc.payload, oc.pdf_path,
+      oc.payload, oc.pdf_path, oc.codigo_cliente ?? null,
     ];
 
     let ocId = existenteId;
@@ -44,7 +44,7 @@ const guardarOCRecibida = async (oc, existenteId = null) => {
         `UPDATE bd_api_automarco.tbl_planet_oc
          SET fecha_oc = ?, cliente = ?, moneda = ?, proveedor_rut = ?, proveedor_codigo = ?,
              despacho_centro = ?, despacho_direccion = ?, total_neto = ?, total_bruto = ?,
-             payload = ?, pdf_path = ?, estado = 'recibida', error_detalle = NULL,
+             payload = ?, pdf_path = ?, codigo_cliente = ?, estado = 'recibida', error_detalle = NULL,
              alertas = NULL, intentos = intentos + 1, fecha_recepcion = NOW(), fecha_proceso = NULL
          WHERE id = ?
            AND (estado = 'con_error'
@@ -57,8 +57,8 @@ const guardarOCRecibida = async (oc, existenteId = null) => {
       const [r] = await db.execute(
         `INSERT INTO bd_api_automarco.tbl_planet_oc
          (fecha_oc, cliente, moneda, proveedor_rut, proveedor_codigo, despacho_centro,
-          despacho_direccion, total_neto, total_bruto, payload, pdf_path, numero_oc)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          despacho_direccion, total_neto, total_bruto, payload, pdf_path, codigo_cliente, numero_oc)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [...valores, oc.numero_oc]
       );
       ocId = r.insertId;
@@ -125,7 +125,18 @@ const buscarSkuPorCodigoPlanet = async (codigo_planet) => {
   return rows[0]?.sku || null;
 };
 
+// codigo del local de Planet (ej. "AP0031") + empresa -> cli_sec del cliente Planet
+const buscarSucursalPorCodigo = async (codigo_planet, empresa) => {
+  const [rows] = await connection.execute(
+    `SELECT cli_sec FROM bd_api_automarco.tbl_planet_despachos
+     WHERE codigo_planet = ? AND empresa = ?`,
+    [codigo_planet, empresa]
+  );
+  return rows[0]?.cli_sec ?? null;
+};
+
 // direccion de despacho normalizada + empresa -> cli_sec del cliente Planet
+// (respaldo cuando el codigo no esta cargado)
 const buscarSucursalDespacho = async (direccion_normalizada, empresa) => {
   const [rows] = await connection.execute(
     `SELECT cli_sec FROM bd_api_automarco.tbl_planet_despachos
@@ -143,5 +154,6 @@ export {
   marcarOCConError,
   actualizarItemResuelto,
   buscarSkuPorCodigoPlanet,
+  buscarSucursalPorCodigo,
   buscarSucursalDespacho,
 };

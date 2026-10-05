@@ -32,4 +32,12 @@ const normalizarDireccion = (valor) =>
     .replace(/\s+/g, " ")
     .trim();
 
-export { parseNumeroCL, parseFechaPlanet, normalizarDireccion };
+// Codigo del local de Planet al inicio de orden_compra.cliente, que se busca en
+// tbl_planet_despachos.codigo_planet: "AP0031 - Buin" -> "AP0031" |
+// "AP0031" -> "AP0031" | sin ese formato -> null
+const extraerCodigoCliente = (valor) => {
+  const m = /^\s*([A-Za-z0-9]+)\s*(?:-|$)/.exec(String(valor || ""));
+  return m ? m[1].toUpperCase() : null;
+};
+
+export { parseNumeroCL, parseFechaPlanet, normalizarDireccion, extraerCodigoCliente };

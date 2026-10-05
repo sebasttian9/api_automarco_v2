@@ -124,8 +124,10 @@ hasta 3 veces** y después avisan a su equipo interno.
 - Reintentan 3 veces y luego avisan a su equipo interno.
 - `items[].precio` es el precio **sin descuento**, y el descuento viene en
   `items[].descuento_porcentaje`.
-- La dirección de despacho de cada sucursal es fija → el mapeo de
-  `tbl_planet_despachos` por dirección es estable.
+- La sucursal se busca en `tbl_planet_despachos` primero por el código del local que
+  viene al inicio de `orden_compra.cliente` (`"AP0031 - Buin"` → `codigo_planet = 'AP0031'`)
+  y, si ese código no está cargado para la empresa, por la dirección de despacho
+  (que es fija por sucursal). Si se usó la dirección, la OC queda con una alerta.
 - La factura debe llevar el número y la fecha de la OC → se guardan en
   `tbl_pedidos.oc_numero` / `oc_fecha` (ALTER en `sql/planet_oc.sql`). El proceso que
   completa la inyección en la DMZ (fuera de este repo) debe leerlos y escribir la

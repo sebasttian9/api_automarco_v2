@@ -16,9 +16,10 @@ import {
   marcarOCConError,
   actualizarItemResuelto,
   buscarSkuPorCodigoPlanet,
+  buscarSucursalPorCodigo,
   buscarSucursalDespacho,
 } from "../models/pedidosPlanetModel.js";
-import { parseNumeroCL, parseFechaPlanet, normalizarDireccion } from "../helpers/planet.js";
+import { parseNumeroCL, parseFechaPlanet, normalizarDireccion, extraerCodigoCliente } from "../helpers/planet.js";
 import { enviarAviso } from "../helpers/notificador.js";
 import { ValidationError } from "../helpers/errors.js";
 
@@ -58,6 +59,7 @@ const leerOC = (body) => {
     fecha_oc: parseFechaPlanet(oc.fecha),
     fecha_original: oc.fecha,
     cliente: texto(oc.cliente, 150),
+    codigo_cliente: texto(extraerCodigoCliente(oc.cliente), 50),
     moneda: texto(oc.moneda, 10),
     proveedor_rut: texto(prov.rut, 15),
     proveedor_codigo: texto(prov.codigo, 20),
@@ -149,7 +151,10 @@ const procesarOC = async (ocId, oc, alertas) => {
     }
   }
 
-  // 3. sucursal de despacho por empresa (FRENOS usa la de GABTEC, como en /pedidos)
+  // 3. sucursal de despacho por empresa (FRENOS usa la de GABTEC, como en /pedidos):
+  //    primero por el codigo del local que viene en orden_compra.cliente
+  //    ("AP0031 - Buin"); si no esta cargado, por la direccion de despacho.
+  const codigo = oc.codigo_cliente;
   const direccion = normalizarDireccion(oc.despacho_direccion);
   const empresas = [...new Set(productos.map((p) => p.empresa))];
   const sucursalPorEmpresa = {};
@@ -160,17 +165,25 @@ const procesarOC = async (ocId, oc, alertas) => {
   if (empresasFacturan.size > 1) {
     alertas.push(`La OC trae productos de más de una empresa (${[...empresasFacturan].join(", ")}); se generó un pedido por empresa.`);
   }
-  const sinSucursal = [];
+  const sinSucursal = new Set();
+  const porDireccion = new Set();
 
   for (const emp of empresas) {
     const empresaSucursal = emp === "FRENOS" ? "GABTEC" : emp;
-    const cli_sec = direccion ? await buscarSucursalDespacho(direccion, empresaSucursal) : null;
-    if (cli_sec === null) sinSucursal.push(empresaSucursal);
+    let cli_sec = codigo ? await buscarSucursalPorCodigo(codigo, empresaSucursal) : null;
+    if (cli_sec === null && direccion) {
+      cli_sec = await buscarSucursalDespacho(direccion, empresaSucursal);
+      if (cli_sec !== null) porDireccion.add(empresaSucursal);
+    }
+    if (cli_sec === null) sinSucursal.add(empresaSucursal);
     else sucursalPorEmpresa[emp] = cli_sec;
   }
 
-  if (sinSucursal.length > 0) {
-    throw new ValidationError(`La dirección de despacho "${oc.despacho_direccion}" no tiene sucursal asociada en tbl_planet_despachos para: ${[...new Set(sinSucursal)].join(", ")} (clave buscada: "${direccion}")`);
+  if (sinSucursal.size > 0) {
+    throw new ValidationError(`El local "${oc.cliente ?? ""}" / dirección "${oc.despacho_direccion ?? ""}" no tiene sucursal asociada en tbl_planet_despachos para: ${[...sinSucursal].join(", ")} (claves buscadas: codigo_planet "${codigo ?? ""}", direccion_normalizada "${direccion}")`);
+  }
+  if (porDireccion.size > 0) {
+    alertas.push(`Sucursal resuelta por dirección para ${[...porDireccion].join(", ")}: el código "${codigo ?? "(sin código en cliente)"}" no está cargado en tbl_planet_despachos.codigo_planet.`);
   }
 
   // 4. agrupar por empresa (GABTEC + FRENOS juntos -> UNIFICADO, igual que /pedidos)
