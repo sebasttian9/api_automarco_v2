@@ -144,3 +144,12 @@ CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_precios (
 -- precio verde con el que se genero el pedido (precio_lista sigue siendo nuestra lista)
 ALTER TABLE bd_api_automarco.tbl_planet_oc_items
   ADD COLUMN precio_verde DECIMAL(14,2) NULL AFTER precio_lista;
+
+-- ============================================================================
+-- MIGRACION envio del PDF de la OC (scripts/envioPdfPlanet.js, cron).
+-- YA APLICADA EN PRODUCCION (se hizo a mano; se documenta aca el 2026-11-04).
+-- oc_pdf_enviado: 1 cuando el correo con el PDF salio; NULL/0 = pendiente.
+-- ============================================================================
+-- ALTER TABLE bd_api_automarco.tbl_pedidos
+--   ADD COLUMN oc_pdf_enviado     TINYINT(1) NULL,
+--   ADD COLUMN oc_pdf_fecha_envio DATETIME   NULL;
