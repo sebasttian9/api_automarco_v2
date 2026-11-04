@@ -137,7 +137,17 @@ hasta 3 veces** y después avisan a su equipo interno.
 
 1. El cliente de los pedidos es siempre Grupo Planet → `PLANET_CLIENTE_RUT` fijo.
 2. Transporte fijo (`PLANET_TRANSPORTE`), la OC no lo trae.
-3. Se guarda nuestro **precio de lista + descuento** (igual que `/pedidos`); si el
-   precio o el descuento de la OC no coinciden con los nuestros, se procesa igual y
-   queda como alerta (y se avisa por correo).
-4. No se valida `multiplo` ni stock.
+3. No se valida `multiplo` ni stock.
+
+**Precio venta verde (2026-11-04):** las OC de Planet se facturan al precio "venta
+verde" de `tbl_planet_precios` (neto con el descuento ya aplicado; el ERP respeta el
+precio que mandamos). El pedido va con ese precio y **descuento 0**, ya no con
+precio de lista + descuento como `/pedidos`. Un SKU que no esté en la tabla
+**rechaza la OC** (422 + correo). Si el precio de la OC (precio × (1 − descuento%))
+no coincide con el verde, se procesa igual y queda alerta. En `tbl_planet_oc_items`
+quedan `precio_lista` (nuestra lista) y `precio_verde` (el usado). La lista se carga
+con `node scripts/cargarPreciosPlanet.js lista.csv` (revisa) y `... --grabar`
+(reemplaza la tabla entera).
+
+**Envío del PDF de la OC:** `scripts/envioPdfPlanet.js` (cron cada 10 min) manda el
+PDF por correo cuando el pedido ya tiene nota de venta (PEDNUM) en la DMZ.

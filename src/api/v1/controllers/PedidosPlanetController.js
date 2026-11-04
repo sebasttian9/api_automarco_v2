@@ -15,6 +15,7 @@ import {
   marcarOCProcesada,
   marcarOCConError,
   actualizarItemResuelto,
+  buscarPreciosVerde,
   buscarSkuPorCodigoPlanet,
   buscarSucursalPorCodigo,
   buscarSucursalDespacho,
@@ -131,27 +132,39 @@ const procesarOC = async (ocId, oc, alertas) => {
     throw new ValidationError(`Cantidades inválidas: ${cantidadesInvalidas.join(", ")}`);
   }
 
-  // 2. empresa, precio de lista y descuento de cada SKU (misma logica que /pedidos;
-  //    lanza ValidationError si algun SKU no existe en ninguna empresa)
+  // 2. empresa de cada SKU (misma logica que /pedidos; lanza ValidationError si
+  //    algun SKU no existe en ninguna empresa)
   await validarPedidoEmpresa(productos, rut);
 
+  // 3. precio venta verde (tbl_planet_precios): neto con el descuento ya aplicado,
+  //    asi que el pedido va con ese precio y descuento 0. Un SKU sin precio verde
+  //    rechaza la OC entera.
+  const preciosVerde = await buscarPreciosVerde([...new Set(productos.map((p) => p.sku))]);
+  const sinPrecioVerde = [...new Set(productos.filter((p) => preciosVerde[p.sku] === undefined).map((p) => p.sku))];
+  if (sinPrecioVerde.length > 0) {
+    throw new ValidationError(`SKU sin precio venta verde en tbl_planet_precios: ${sinPrecioVerde.join(", ")}`);
+  }
+
   for (const p of productos) {
+    const precioLista = p.precio;
+    p.precio = preciosVerde[p.sku];
+    p.descuento = 0;
+
     await actualizarItemResuelto(ocId, p.item, {
-      sku: p.sku, empresa: p.empresa, precio_lista: p.precio, descuento: p.descuento,
+      sku: p.sku, empresa: p.empresa, precio_lista: precioLista, precio_verde: p.precio, descuento: 0,
     });
 
-    // aviso (no bloquea) si el precio o el descuento de la OC no calzan con los
-    // nuestros. Planet envia el precio SIN descuento + descuento_porcentaje aparte.
-    const descuentoNuestro = Number(p.descuento) || 0;
-    if (p.precio_oc !== null && Math.round(p.precio_oc) !== Math.round(p.precio)) {
-      alertas.push(`Precio distinto en ${p.sku}: OC $${p.precio_oc}, nuestra lista $${p.precio}.`);
-    }
-    if (Number(p.descuento_oc) !== descuentoNuestro) {
-      alertas.push(`Descuento distinto en ${p.sku}: OC ${p.descuento_oc}%, nuestro ${descuentoNuestro}%.`);
+    // aviso (no bloquea) si el precio de la OC no calza con el precio verde.
+    // Planet envia el precio SIN descuento + descuento_porcentaje aparte.
+    if (p.precio_oc !== null) {
+      const netoOC = Math.round(p.precio_oc * (1 - (Number(p.descuento_oc) || 0) / 100));
+      if (netoOC !== Math.round(p.precio)) {
+        alertas.push(`Precio distinto en ${p.sku}: OC $${p.precio_oc} con ${p.descuento_oc}% = $${netoOC}, precio venta verde $${p.precio}.`);
+      }
     }
   }
 
-  // 3. sucursal de despacho por empresa (FRENOS usa la de GABTEC, como en /pedidos):
+  // 4. sucursal de despacho por empresa (FRENOS usa la de GABTEC, como en /pedidos):
   //    primero por el codigo del local que viene en orden_compra.cliente
   //    ("AP0031 - Buin"); si no esta cargado, por la direccion de despacho.
   const codigo = oc.codigo_cliente;
@@ -186,7 +199,7 @@ const procesarOC = async (ocId, oc, alertas) => {
     alertas.push(`Sucursal resuelta por dirección para ${[...porDireccion].join(", ")}: el código "${codigo ?? "(sin código en cliente)"}" no está cargado en tbl_planet_despachos.codigo_planet.`);
   }
 
-  // 4. agrupar por empresa (GABTEC + FRENOS juntos -> UNIFICADO, igual que /pedidos)
+  // 5. agrupar por empresa (GABTEC + FRENOS juntos -> UNIFICADO, igual que /pedidos)
   const grupos = {};
   for (const p of productos) (grupos[p.empresa] ||= []).push(p);
   if (grupos.GABTEC && grupos.FRENOS) {
@@ -196,7 +209,7 @@ const procesarOC = async (ocId, oc, alertas) => {
     delete grupos.FRENOS;
   }
 
-  // 5. insertar un pedido por empresa y marcar la OC 'procesada', todo en una
+  // 6. insertar un pedido por empresa y marcar la OC 'procesada', todo en una
   //    sola transaccion (ver marcarOCProcesada)
   const db = await connection.getConnection();
   try {

@@ -125,3 +125,22 @@ ALTER TABLE bd_api_automarco.tbl_planet_despachos
   ADD UNIQUE KEY uk_planet_despacho_codigo (codigo_planet, empresa);
 ALTER TABLE bd_api_automarco.tbl_planet_oc
   ADD COLUMN codigo_cliente VARCHAR(50) NULL AFTER cliente;
+
+-- ============================================================================
+-- MIGRACION 2026-11-04: precio venta verde.
+-- Las OC de Planet se facturan al precio "venta verde" (neto, con el descuento ya
+-- aplicado): el pedido va con ese precio y descuento 0. Un SKU que no este en
+-- esta tabla rechaza la OC (422 + correo a NOTIFICAR_PLANET_A).
+-- La tabla se reemplaza entera con scripts/cargarPreciosPlanet.js <archivo.csv>.
+-- Correr ANTES de subir la version de la API que la usa.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS bd_api_automarco.tbl_planet_precios (
+  sku          VARCHAR(40)   NOT NULL,                   -- nuestro SKU, ej. "10038-2"
+  precio       DECIMAL(14,2) NOT NULL,                   -- precio venta verde, neto con descuento
+  fecha_carga  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (sku)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- precio verde con el que se genero el pedido (precio_lista sigue siendo nuestra lista)
+ALTER TABLE bd_api_automarco.tbl_planet_oc_items
+  ADD COLUMN precio_verde DECIMAL(14,2) NULL AFTER precio_lista;

@@ -106,14 +106,27 @@ const marcarOCConError = async (ocId, detalle) => {
   );
 };
 
-// deja registrado en cada item lo que se resolvio (sku, empresa, precio de lista)
+// deja registrado en cada item lo que se resolvio (sku, empresa, precio de lista
+// y precio venta verde con el que se genero el pedido)
 const actualizarItemResuelto = async (ocId, item, datos) => {
   await connection.execute(
     `UPDATE bd_api_automarco.tbl_planet_oc_items
-     SET sku = ?, empresa = ?, precio_lista = ?, descuento = ?
+     SET sku = ?, empresa = ?, precio_lista = ?, precio_verde = ?, descuento = ?
      WHERE oc_id = ? AND item <=> ?`,
-    [datos.sku, datos.empresa, datos.precio_lista, datos.descuento, ocId, item]
+    [datos.sku, datos.empresa, datos.precio_lista, datos.precio_verde ?? null, datos.descuento, ocId, item]
   );
+};
+
+// SKUs -> { sku: precio venta verde } (neto, con el descuento ya aplicado), desde
+// tbl_planet_precios (se carga con scripts/cargarPreciosPlanet.js). Los SKU que no
+// estan en la lista no vienen en el resultado.
+const buscarPreciosVerde = async (skus) => {
+  if (skus.length === 0) return {};
+  const [rows] = await connection.query(
+    `SELECT sku, precio FROM bd_api_automarco.tbl_planet_precios WHERE sku IN (?)`,
+    [skus]
+  );
+  return Object.fromEntries(rows.map((r) => [r.sku, Number(r.precio)]));
 };
 
 // codigo de Planet -> SKU nuestro (solo cuando orden_servicio viene vacio)
@@ -153,6 +166,7 @@ export {
   marcarOCProcesada,
   marcarOCConError,
   actualizarItemResuelto,
+  buscarPreciosVerde,
   buscarSkuPorCodigoPlanet,
   buscarSucursalPorCodigo,
   buscarSucursalDespacho,
