@@ -149,5 +149,11 @@ quedan `precio_lista` (nuestra lista) y `precio_verde` (el usado). La lista se c
 con `node scripts/cargarPreciosPlanet.js lista.csv` (revisa) y `... --grabar`
 (reemplaza la tabla entera).
 
+**Registro de peticiones (2026-11-09):** el webhook se monta antes del `logger()`
+global, así que no aparece en los `logs/AAAA-MM-DD.log` ni en `tbl_logs`. Cada
+petición queda en `logs/pedidos-planet.log` (middleware `logPlanet`, primero en la
+ruta): fecha UTC, IP, status, ms, usuario Basic (sin contraseña), número de OC, cantidad
+de ítems, tamaño y mensaje de error. Incluye las rechazadas (401, 429, 413...).
+
 **Envío del PDF de la OC:** `scripts/envioPdfPlanet.js` (cron cada 10 min) manda el
 PDF por correo cuando el pedido ya tiene nota de venta (PEDNUM) en la DMZ.
